@@ -2,6 +2,8 @@
 
 //#define FEMU_DEBUG_FTL
 
+#ifndef USE_LIFETIME_FTL
+
 static void *ftl_thread(void *arg);
 
 static inline bool should_gc(struct ssd *ssd)
@@ -788,7 +790,7 @@ static uint64_t ssd_read(struct ssd *ssd, NvmeRequest *req)
     uint64_t sublat, maxlat = 0;
 
     if (end_lpn >= spp->tt_pgs) {
-        ftl_err("start_lpn=%lu,tt_pgs=%d\n", start_lpn, ssd->sp.tt_pgs);
+        ftl_err("start_lpn=%"PRIu64",tt_pgs=%d\n", start_lpn, ssd->sp.tt_pgs);
     }
 
     /* normal IO read path */
@@ -825,7 +827,7 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
     int r;
 
     if (end_lpn >= spp->tt_pgs) {
-        ftl_err("start_lpn=%lu,tt_pgs=%d\n", start_lpn, ssd->sp.tt_pgs);
+        ftl_err("start_lpn=%"PRIu64",tt_pgs=%d\n", start_lpn, ssd->sp.tt_pgs);
     }
 
     while (should_gc_high(ssd)) {
@@ -927,3 +929,5 @@ static void *ftl_thread(void *arg)
 
     return NULL;
 }
+
+#endif /* USE_LIFETIME_FTL */

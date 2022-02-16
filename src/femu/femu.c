@@ -1,6 +1,12 @@
 #include <femu.h>
 #include "nvme.h"
+#include "ftl_config.h"
+
+#ifdef USE_LIFETIME_FTL
+#include "lftl.h"
+#else
 #include "ftl.h"
+#endif
 
 struct poller_args {
     struct FemuCtrl *femu;

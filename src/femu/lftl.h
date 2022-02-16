@@ -3,7 +3,7 @@
 
 #include "ftl_config.h"
 
-#ifndef USE_LIFETIME_FTL
+#ifdef USE_LIFETIME_FTL
 
 #include <stdio.h>
 #include <stdint.h>
@@ -21,6 +21,18 @@
 #define INVALID_PPA     (~(0ULL))
 #define INVALID_LPN     (~(0ULL))
 #define UNMAPPED_PPA    (~(0ULL))
+
+#define WB_INDEX_NULL   (-1)
+
+/* hot classes first */
+static double lifetime_class_proportions[] = {
+    0.1,
+    0.9,
+};
+
+#define NR_LIFETIME_CLASS (sizeof(lifetime_class_proportions) / sizeof(lifetime_class_proportions[0]))
+
+#define LIFETIME_CLASS_UNSEEN NR_LIFETIME_CLASS
 
 enum {
     NAND_READ =  0,
@@ -99,11 +111,23 @@ struct nand_block {
     int vpc; /* valid page count */
     int erase_cnt;
     int wp; /* current write pointer */
+
+    QTAILQ_ENTRY(nand_block) tq;
+
+    size_t pos;
+    pqueue_pri_t pri; /* vpc */
 };
 
 struct nand_plane {
     struct nand_block *blk;
     int nblks;
+    int writable_blk_cnt; /* includes active blocks */
+
+    struct nand_block *active_blks[NR_LIFETIME_CLASS];
+    struct nand_block *unseen;
+    QTAILQ_HEAD(free_blks, nand_block) free_blks;
+    QTAILQ_HEAD(full_blks, nand_block) full_blks;
+    pqueue_t *victim_blks;
 };
 
 struct nand_lun {
@@ -137,6 +161,8 @@ struct ssdparams {
     int ch_xfer_lat;  /* channel transfer latency for one page in nanoseconds
                        * this defines the channel bandwith
                        */
+
+    uint64_t write_buffer_size;
 
     double gc_thres_pcent;
     int gc_thres_lines;
@@ -174,42 +200,59 @@ struct ssdparams {
     uint64_t flash_size;  /* size of NAND flash, in bytes */
 };
 
-typedef struct line {
-    int id;  /* line id, the same as corresponding block id */
-    int ipc; /* invalid page count in this line */
-    int vpc; /* valid page count in this line */
-    QTAILQ_ENTRY(line) entry; /* in either {free,victim,full} list */
-    /* position in the priority queue for victim lines */
-    size_t pos;
-} line;
-
 /* wp: record next write addr */
 struct write_pointer {
-    struct line *curline;
     int ch;
     int lun;
-    int pg;
-    int blk;
     int pl;
-};
-
-struct line_mgmt {
-    struct line *lines;
-    /* free line list, we only need to maintain a list of blk numbers */
-    QTAILQ_HEAD(free_line_list, line) free_line_list;
-    pqueue_t *victim_line_pq;
-    //QTAILQ_HEAD(victim_line_list, line) victim_line_list;
-    QTAILQ_HEAD(full_line_list, line) full_line_list;
-    int tt_lines;
-    int free_line_cnt;
-    int victim_line_cnt;
-    int full_line_cnt;
+    struct nand_block *last_written_blk;
 };
 
 struct nand_cmd {
     int type;
     int cmd;
     int64_t stime; /* Coperd: request arrival time */
+};
+
+struct logical_page {
+    uint64_t lpn;
+    int lc;
+    QTAILQ_ENTRY(logical_page) lru;
+};
+
+struct lifetime_mgmt {
+    struct logical_page *pgs;
+    QTAILQ_HEAD(classes, logical_page) classes[NR_LIFETIME_CLASS];
+    uint64_t pg_cnts[NR_LIFETIME_CLASS];
+    uint64_t max_pgs[NR_LIFETIME_CLASS];
+};
+
+struct gc_info {
+    uint64_t writable_blk_cnt; /* includes active blocks in each plane */
+
+    uint64_t global_gc_thres;
+    uint64_t per_pl_gc_thres;
+
+    bool gc_requested;
+};
+
+struct write_buffer_slot {
+    uint64_t lpn;
+    bool dirty;
+    QTAILQ_ENTRY(write_buffer_slot) lru;
+};
+
+struct write_buffer {
+    struct write_buffer_slot *slots;
+
+    QTAILQ_HEAD(free_slots, write_buffer_slot) free_slots;
+    QTAILQ_HEAD(used_slots, write_buffer_slot) used_slots;
+
+    int *lpn2index;
+
+    uint64_t nslots;
+    uint64_t used_slot_cnt;
+    uint64_t dirty_slot_cnt;
 };
 
 struct ssd {
@@ -219,13 +262,16 @@ struct ssd {
     struct ppa *maptbl; /* page level mapping table */
     uint64_t *rmap;     /* reverse mapptbl, assume it's stored in OOB */
     struct write_pointer wp;
-    struct line_mgmt lm;
+    struct write_buffer wb;
 
     /* lockless ring for communication with NVMe IO thread */
     struct rte_ring **to_ftl;
     struct rte_ring **to_poller;
     bool *dataplane_started_ptr;
     pthread_t ftl_thread;
+
+    struct lifetime_mgmt lifetime_mgmt;
+    struct gc_info gc_info;
 };
 
 void ssd_init(FemuCtrl *n);
@@ -251,6 +297,25 @@ void ssd_init(FemuCtrl *n);
 #else
 #define ftl_assert(expression)
 #endif
+
+#define FOR_EACH_CHANNEL(ssdp, chp) \
+for ((chp) = (ssdp)->ch; (chp) != (ssdp)->ch + (ssdp)->sp.nchs; (chp)++)
+
+#define FOR_EACH_LUN(ssdp, chp, lunp) \
+FOR_EACH_CHANNEL((ssdp), (chp)) \
+    for ((lunp) = (chp)->lun; (lunp) != (chp)->lun + (chp)->nluns; (lunp)++)
+
+#define FOR_EACH_PLANE(ssdp, chp, lunp, plp) \
+FOR_EACH_LUN((ssdp), (chp), (lunp)) \
+    for((plp) = (lunp)->pl; (plp) != (lunp)->pl + (lunp)->npls; (plp)++)
+
+#define FOR_EACH_BLOCK(ssdp, chp, lunp, plp, blkp) \
+FOR_EACH_PLANE((ssdp), (chp), (lunp), (plp)) \
+    for ((blkp) = (plp)->blk; (blkp) != (plp)->blk + (plp)->nblks; (blkp)++)
+
+#define FOR_EACH_PAGE(ssdp, chp, lunp, plp, blkp, pgp) \
+FOR_EACH_BLOCK((ssdp), (chp), (lunp), (plp), (blkp)) \
+    for ((pgp) = (blk)->pg; (pgp) != (blk)->pg + (blk)->npgs; (pgp)++)
 
 #endif /* USE_LIFETIME_FTL */
 
