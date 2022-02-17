@@ -912,8 +912,10 @@ static void *ftl_thread(void *arg)
                 ;
             }
 
-            req->reqlat = lat;
-            req->expire_time += lat;
+            if (n->enable_latency) {
+                req->reqlat = lat;
+                req->expire_time += lat;
+            }
 
             rc = femu_ring_enqueue(ssd->to_poller[i], (void *)&req, 1);
             if (rc != 1) {

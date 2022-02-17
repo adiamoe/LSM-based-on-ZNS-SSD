@@ -7,7 +7,7 @@
 
 int main()
 {
-    struct FemuCtrl *femu = femu_init(SSD_SIZE);
+    struct FemuCtrl *femu = femu_init(SSD_SIZE, false, false);
     static char buf[512 * 1024];
 
     srand((unsigned int)time(NULL));

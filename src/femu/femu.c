@@ -101,14 +101,16 @@ static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, int op)
     while (!req.completed);
 }
 
-struct FemuCtrl *femu_init(size_t ssd_size)
+struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_latency)
 {
     struct FemuCtrl *femu = g_malloc0(sizeof(struct FemuCtrl));
     struct poller_args args;
 
     femu->ssd = g_malloc0(sizeof(struct ssd));
-    femu->backend = g_malloc0(ssd_size);
+    femu->backend = enable_backend ? g_malloc0(ssd_size) : NULL;
     femu->devsz = ssd_size;
+
+    femu->enable_latency = enable_latency;
 
     femu->num_poller = FEMU_NUM_POLLER;
     femu->to_ftl = g_malloc0(FEMU_NUM_POLLER * sizeof(struct rte_ring *));
@@ -143,7 +145,8 @@ struct FemuCtrl *femu_init(size_t ssd_size)
 
 int femu_read(struct FemuCtrl *femu, void *buf, size_t len, off_t offset)
 {
-    memcpy(buf, femu->backend + offset, len);
+    if (femu->backend != NULL)
+        memcpy(buf, femu->backend + offset, len);
 
     dispatch_io(femu, len, offset, NVME_CMD_READ);
 
@@ -152,7 +155,8 @@ int femu_read(struct FemuCtrl *femu, void *buf, size_t len, off_t offset)
 
 int femu_write(struct FemuCtrl *femu, const void *buf, size_t len, off_t offset)
 {
-    memcpy(femu->backend + offset, buf, len);
+    if (femu->backend != NULL)
+        memcpy(femu->backend + offset, buf, len);
 
     dispatch_io(femu, len, offset, NVME_CMD_WRITE);
 

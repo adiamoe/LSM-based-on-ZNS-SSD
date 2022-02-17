@@ -52,13 +52,15 @@ typedef struct FemuCtrl {
     void                 *backend;
     uint64_t             devsz;
 
+    bool                 enable_latency;
+
     uint32_t             num_poller;
     struct rte_ring      **to_ftl;
     struct rte_ring      **to_poller;
     pqueue_t             **pqs;
     pthread_t            *pollers;
 
-    bool dataplane_started;
+    bool                 dataplane_started;
 
     atomic_uint_fast64_t req_id;
 } FemuCtrl;
