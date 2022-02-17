@@ -21,9 +21,9 @@ int main()
             offset -= len;
 
         if (op)
-            femu_read(femu, buf, len, offset);
+            femu_read(femu, buf, len, offset, NULL);
         else
-            femu_write(femu, buf, len, offset);
+            femu_write(femu, buf, len, offset, NULL);
 
         printf("%d %lu %ld\n", op, len, offset);
     }

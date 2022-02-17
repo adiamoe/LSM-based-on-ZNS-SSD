@@ -69,7 +69,7 @@ static void *femu_poller(void *arg)
     }
 }
 
-static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, int op)
+static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *arg, int op)
 {
     uint64_t id = alloc_req_id(femu);
     uint64_t secsz = femu->ssd->sp.secsz;
@@ -88,8 +88,8 @@ static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, int op)
     req.slba = start_lba;
     req.nlb = end_lba - start_lba;
     req.cmd.opcode = op;
-    req.stime = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-    req.expire_time = req.stime;
+    req.stime = req.expire_time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    req.arg = arg;
     req.completed = false;
 
     do {
@@ -143,22 +143,22 @@ struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_lat
     return femu;
 }
 
-int femu_read(struct FemuCtrl *femu, void *buf, size_t len, off_t offset)
+int femu_read(struct FemuCtrl *femu, void *buf, size_t len, off_t offset, void *arg)
 {
     if (femu->backend != NULL)
         memcpy(buf, femu->backend + offset, len);
 
-    dispatch_io(femu, len, offset, NVME_CMD_READ);
+    dispatch_io(femu, len, offset, arg, NVME_CMD_READ);
 
     return 0;
 }
 
-int femu_write(struct FemuCtrl *femu, const void *buf, size_t len, off_t offset)
+int femu_write(struct FemuCtrl *femu, const void *buf, size_t len, off_t offset, void *arg)
 {
     if (femu->backend != NULL)
         memcpy(femu->backend + offset, buf, len);
 
-    dispatch_io(femu, len, offset, NVME_CMD_WRITE);
+    dispatch_io(femu, len, offset, arg, NVME_CMD_WRITE);
 
     return 0;
 }

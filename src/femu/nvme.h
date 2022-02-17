@@ -40,11 +40,12 @@ typedef struct NvmeRequest {
     int64_t                 stime;
     int64_t                 reqlat;
     int64_t                 expire_time;
+    void                    *arg;
 
     /* position in the priority queue for delay emulation */
     size_t                  pos;
 
-    bool completed;
+    bool                    completed;
 } NvmeRequest;
 
 typedef struct FemuCtrl {
