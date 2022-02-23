@@ -2,16 +2,14 @@
 #include <stdlib.h>
 #include <time.h>
 #include <femu.h>
-#include <vector>
+#include <kvstore.h>
 
 #define SSD_SIZE (8ULL * 1024 * 1024 * 1024)
 
-class node{
-
-};
-
 int main()
 {
+    string path = "./data";
+    KVStore store(path);
     struct FemuCtrl *femu = femu_init(SSD_SIZE, true, true);
     static char buf[512 * 1024];
 

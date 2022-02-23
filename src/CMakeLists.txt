@@ -1,6 +1,7 @@
-include_directories(include)
+include_directories(include LSM-Tree)
 
 add_subdirectory(femu)
+add_subdirectory(LSM-Tree)
 
-add_executable(main main.c)
-target_link_libraries(main femu)
+add_executable(main main.cpp)
+target_link_libraries(main femu LSM-Tree)

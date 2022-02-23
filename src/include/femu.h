@@ -5,10 +5,18 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C"{
+#endif
+
 struct FemuCtrl;
 
 struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_latency);
 int femu_read(struct FemuCtrl *femu, void *buf, size_t len, off_t offset, void *arg);
 int femu_write(struct FemuCtrl *femu, const void *buf, size_t len, off_t offset, void *arg);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
