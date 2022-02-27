@@ -4,4 +4,4 @@ add_subdirectory(femu)
 add_subdirectory(LSM-Tree)
 
 add_executable(main main.cpp)
-target_link_libraries(main femu LSM-Tree)
+target_link_libraries(main LSM-Tree femu)

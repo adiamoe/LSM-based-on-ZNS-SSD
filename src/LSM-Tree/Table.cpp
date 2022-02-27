@@ -1,14 +1,101 @@
 #include "Table.h"
 
-Table::Table(string &fileName) {
-    sstable = fileName;
-    open();
+Table::Table(MemoryManager &pool, SkipList *memTable, int _num) {
+    level = 0;
+    num = _num;
+    Node *node = memTable->GetFirstNode()->right;
+
+    TimeAndNum[0] = memTable->getTimeStamp();
+    uint64_t size = memTable->getSize();
+    TimeAndNum[1] = size;
+    auto min_max = memTable->getMinMaxKey();
+    MinMaxKey[0] = min_max.first;
+    MinMaxKey[1] = min_max.second;
+
+    //写入生成对应的布隆过滤器
+    uint64_t tempKey;
+    const char* tempValue;
+    unsigned int hash[4] = {0};
+    while(node)
+    {
+        tempKey = node->key;
+        MurmurHash3_x64_128(&tempKey, sizeof(tempKey), 1, hash);
+        for(auto i:hash)
+            BloomFilter.set(i%81920);
+        node = node->right;
+    }
+
+    //索引区，计算key对应的索引值，同时储存数据
+    const int dataArea = InitialSize + size * 12;   //数据区开始的位置
+    uint32_t index = 0;
+    node = memTable->GetFirstNode()->right;
+    int curlength = 0;
+    while(node)
+    {
+        tempKey = node->key;
+        index = dataArea + curlength;
+        offset[tempKey] = index;
+        keyValue[tempKey] = node->val;
+        curlength += node->val.size()+1;
+        node = node->right;
+    }
+
+    dataLength = curlength;
+    pool.writeTable(0, num);
+    memTable->clear();
+}
+
+Table::Table(MemoryManager &pool, int _level, int _num, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable) {
+    level = _level;
+    num = _num;
+
+    auto iter1 = newTable.begin();
+    uint64_t minKey = iter1->first;
+    auto iter2 = newTable.rbegin();
+    uint64_t maxKey = iter2->first;
+
+    //写入时间戳、键值对个数和最小最大键
+    TimeAndNum[0] = timeStamp;
+    TimeAndNum[1] = numPair;
+    MinMaxKey[0] = minKey;
+    MinMaxKey[1] = maxKey;
+
+    //写入生成对应的布隆过滤器
+    uint64_t tempKey;
+    const char* tempValue;
+    unsigned int hash[4] = {0};
+    while(iter1!=newTable.end())
+    {
+        tempKey = iter1->first;
+        MurmurHash3_x64_128(&tempKey, sizeof(tempKey), 1, hash);
+        for(auto i:hash)
+            BloomFilter.set(i%81920);
+        iter1++;
+    }
+
+    //索引区，计算key对应的索引值
+    const int dataArea = InitialSize + numPair * 12;   //数据区开始的位置
+    uint32_t index = 0;
+    int curlength = 0;
+    iter1 = newTable.begin();
+    while(iter1!=newTable.end())
+    {
+        tempKey = iter1->first;
+        index = dataArea + curlength;
+        offset[tempKey] = index;
+        keyValue[tempKey] = iter1->second;
+        curlength += (iter1->second).size()+1;
+        iter1++;
+    }
+
+    dataLength = curlength;
+    pool.writeTable(level, num);
 }
 
 /**
  * 根据输入的key，寻找文件中有无对应的value
  */
-string Table::getValue(const uint64_t key) const{
+string Table::getValue(MemoryManager &pool, const uint64_t key) const{
     if(key<MinMaxKey[0] || key>MinMaxKey[1])
         return "";
     //通过布隆过滤器判断key是否存在，如果有其中一个bit为0，则证明不存在
@@ -25,70 +112,22 @@ string Table::getValue(const uint64_t key) const{
     auto iter2 = offset.find(key);
     iter2++;
 
-    auto *file = new fstream ;
-    file->open(sstable, ios::in|ios::binary);
-    file->seekg(0, ios::end);
-    uint64_t len = iter2!=offset.end()? iter2->second-iter1->second:(int)file->tellg() - iter1->second;
+    const int dataArea = InitialSize + TimeAndNum[1] * 12;
+    uint64_t len = iter2!=offset.end()? (iter2->second-iter1->second):(dataArea + dataLength - iter1->second);
 
-    char* ans = new char[len];
+    pool.readTable(level, num, iter1->second, len);
 
-
-    file->seekg(iter1->second);
-    file->read(ans, sizeof(char) * len);
-
-    file->close();
+    string ans = keyValue.find(key)->second;
     return ans;
 }
 
 //遍历文件，将键值对全部读进内存
-void Table::traverse(map<int64_t, string> &pair) const{
-    auto *file = new fstream ;
-    file->open(sstable, ios::in|ios::binary);
-    auto iter1 = offset.begin();
-    auto iter2 = offset.begin();
-    iter2++;
-
-    char *ans;
-    uint64_t len;
-    while(iter1!=offset.end())
-    {
-        if(iter2!=offset.end())
-        {
-            len = iter2->second - iter1->second;
-            iter2++;
-        }
-        else
-        {
-            file->seekg(0, ios::end);
-            len = (int)file->tellg() - iter1->second;
-        }
-        file->seekg(iter1->second);
-        ans = new char[len];
-        file->read(ans, sizeof(char) * len);
-        pair[iter1->first] = ans;
-        iter1++;
-    }
-    file->close();
+void Table::traverse(MemoryManager &pool, map<uint64_t, string> &pair) const{
+    pair = keyValue;
+    const int dataArea = InitialSize + TimeAndNum[1] * 12;
+    pool.readTable(level, num, dataArea, dataLength);
 }
 
-//打开文件，将缓存在内存中的各项数据更新
-void Table::open()
-{
-    auto *file = new fstream ;
-    file->open(sstable, ios::in|ios::binary);
-    file->read((char *)(&TimeAndNum), 2* sizeof(uint64_t));
-    file->read((char*)(&MinMaxKey), 2* sizeof(int64_t));
-    file->read((char *)(&BloomFilter), sizeof(BloomFilter));
-
-    int num = TimeAndNum[1];
-    int64_t tempKey;
-    uint32_t  tempOffset;
-    while(num--)
-    {
-        file->read((char*)(&tempKey), sizeof(int64_t));
-        file->read((char*)(&tempOffset), sizeof(uint32_t));
-        offset[tempKey] = tempOffset;
-    }
-
-    file->close();
+void Table::clear(MemoryManager &pool) {
+    pool.deleteTable(level, num);
 }

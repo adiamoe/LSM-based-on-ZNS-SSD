@@ -1,45 +1,12 @@
 #include "kvstore.h"
-#include "utils.h"
 
 //todo:注意reset()
 
-int getFileNum(const string &fileName)
+KVStore::KVStore()
 {
-    auto iter = fileName.find('e');
-    iter++;
-    string file = fileName.substr(iter);
-    return stoi(file);
-}
-
-KVStore::KVStore(const std::string &dir): KVStoreAPI(dir)
-{
-    if(!utils::dirExists(dir))
-        utils::mkdir(dir.c_str());
     memTable = new SkipList;
-    this->dir = dir;
     Level.push_back(0);
 
-    //reset();
-
-    vector<string> ret;
-    int num = utils::scanDir(dir, ret);
-    for(int i=0; i<num; ++i)
-    {
-        SSTable.emplace_back();
-        string path = dir + "/" + ret[i];
-        vector<string> file;
-        int numSST = utils::scanDir(path, file);
-        if(numSST>0)
-            Level.push_back(getFileNum(file[file.size()-1]));
-        else
-            Level.push_back(0);
-        for(int j=0; j<numSST; ++j)
-        {
-            string FileName = path + "/" + file[j];
-            Table sstable(FileName);
-            SSTable[i].insert(sstable);
-        }
-    }
     if(SSTable.empty())
         SSTable.emplace_back();
 }
@@ -47,11 +14,9 @@ KVStore::KVStore(const std::string &dir): KVStoreAPI(dir)
 //将 MemTable 中的所有数据以 SSTable 形式写进磁盘
 KVStore::~KVStore()
 {
-    string path = dir + "/level0";
-    memTable->store(++Level[0], path);
+    Table newTable(memoryPool, memTable, ++Level[0]);
     if(Level[0]==3)
         compactionForLevel(1);
-    memTable->clear();
     delete memTable;
 }
 
@@ -69,15 +34,8 @@ void KVStore::put(uint64_t key, const string &s)
 
     if(memTable->memory > MEMTABLE)
     {
-        string path = dir + "/level0";
-        if(!utils::dirExists(path))
-            utils::mkdir(path.c_str());
-
         Level[0]++;
-        memTable->store(Level[0], path);
-        string newFile = path + "/SSTable" + to_string(Level[0]) + ".sst";
-        Table newTable(newFile);
-        SSTable[0].insert(newTable);
+        SSTable[0].emplace(memoryPool, memTable, Level[0]);
         if(!val.empty())
             memTable->memory += s.size() - val.size();
         else
@@ -111,7 +69,7 @@ std::string KVStore::get(uint64_t key)
     {
         for(auto table = tableList.rbegin(); table!=tableList.rend(); ++table)
         {
-            ans = table->getValue(key);
+            ans = table->getValue(memoryPool, key);
             if(!ans.empty())
             {
                 if(ans==DEL)
@@ -136,36 +94,12 @@ bool KVStore::del(uint64_t key)
     return flag;
 }
 
-/**
- * This resets the kvstore. All key-value pairs should be removed,
- * including memtable and all sstables files.
- */
-void KVStore::reset()
-{
-    memTable->clear();
-    vector<string> file;
-    int numDir = utils::scanDir(dir, file);
-    for(int i=0; i<numDir; ++i)
-    {
-        string path = dir + "/" + file[i];
-        vector<string> ret;
-        int numSST = utils::scanDir(path, ret);
-        for(int j=0; j<numSST; ++j)
-            utils::rmfile((path + "/" +ret[j]).c_str());
-        utils::rmdir(path.c_str());
-    }
-    SSTable.clear();
-    SSTable.emplace_back();
-    Level.clear();
-    Level.push_back(0);
-}
-
-void update(vector<map<int64_t, string>> &KVToCompact, vector<map<int64_t, string>::iterator> &KVToCompactIter,
-        map<int64_t,int> &minKey, int index)
+void update(vector<map<uint64_t, string>> &KVToCompact, vector<map<uint64_t, string>::iterator> &KVToCompactIter,
+        map<uint64_t,int> &minKey, int index)
 {
     while(KVToCompactIter[index]!=KVToCompact[index].end())
     {
-        int64_t select = KVToCompactIter[index]->first;
+        uint64_t select = KVToCompactIter[index]->first;
         if(minKey.count(select)==0)
         {
             minKey[select] = index;
@@ -192,20 +126,17 @@ void KVStore::compactionForLevel(int level)
 {
     //递归中止条件，如果上层的文件数小于最大上限，则不再合并
     int SSTnum = SSTable[level-1].size();
-    if(SSTnum<=UpperNum(level-1))
+    if(SSTnum <= UpperNum(level-1))
         return;
 
-    string path = dir + "/level" + to_string(level);
-    //若没有Level文件夹，先创建
-    if(!utils::dirExists(path))
+    if(Level.size()<=level)
     {
-        utils::mkdir(path.c_str());
         Level.push_back(0);
         SSTable.emplace_back();
     }
 
     bool lastLevel = false;
-    if(level == SSTable.size())
+    if(level == SSTable.size()-1)
         lastLevel = true;
 
     vector<Table> FileToRemoveLevelminus1;                    //记录需要被删除的文件
@@ -216,7 +147,7 @@ void KVStore::compactionForLevel(int level)
     priority_queue<Table, vector<Table>, greater<>> sortTable;
 
     uint64_t timestamp = 0;
-    int64_t tempMin = INT64_MAX, tempMax = INT64_MIN;
+    uint64_t tempMin = INT64_MAX, tempMax = 0;
 
     //需要合并的文件数
     int compactNum = (level-1==0)?UpperNum(0)+1:SSTnum - UpperNum(level-1);
@@ -247,19 +178,19 @@ void KVStore::compactionForLevel(int level)
         }
     }
 
-    vector<map<int64_t, string>> KVToCompact;                   //被合并的键值对，下标越大时间戳越大
-    vector<map<int64_t, string>::iterator> KVToCompactIter;     //键值对迭代器
+    vector<map<uint64_t, string>> KVToCompact;                   //被合并的键值对，下标越大时间戳越大
+    vector<map<uint64_t, string>::iterator> KVToCompactIter;     //键值对迭代器
     int size = InitialSize;
-    map<int64_t, int> minKey;                      //minKey中只存放num个数据，分别为各个SSTable中最小键和对应的SSTable
+    map<uint64_t, int> minKey;                      //minKey中只存放num个数据，分别为各个SSTable中最小键和对应的SSTable
     uint64_t tempKey;
     int index;                                      //对应的SSTable序号
     string tempValue;
-    map<int64_t, string> newTable;                 //暂存合并后的键值对
+    map<uint64_t, string> newTable;                 //暂存合并后的键值对
 
     while(!sortTable.empty())
     {
-        map<int64_t, string> KVPair;
-        sortTable.top().traverse(KVPair);
+        map<uint64_t, string> KVPair;
+        sortTable.top().traverse(memoryPool, KVPair);
         sortTable.pop();
         KVToCompact.push_back(KVPair);
     }
@@ -314,82 +245,22 @@ next:   minKey.erase(tempKey);
     //删除level和level-1中的被合并文件
     for(auto &file:FileToRemoveLevelminus1)
     {
-        utils::rmfile(file.getFileName().data());
+        file.clear(memoryPool);
         SSTable[level-1].erase(file);
     }
 
     for(auto &file:FileToRemoveLevel)
     {
-        utils::rmfile(file.getFileName().data());
+        file.clear(memoryPool);
         SSTable[level].erase(file);
     }
 
     compactionForLevel(level+1);
-    //exit(0);
 }
 
-void KVStore::writeToFile(int level, uint64_t timeStamp, uint64_t numPair, map<int64_t, string> &newTable)
+void KVStore::writeToFile(int level, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable)
 {
-    string path = dir + "/level" + to_string(level);
     Level[level]++;
-    string FileName = path + "/SSTable" + to_string(Level[level]) + ".sst";
-    fstream outFile(FileName, std::ios::app | std::ios::binary);
-
-    auto iter1 = newTable.begin();
-    int64_t minKey = iter1->first;
-    auto iter2 = newTable.rbegin();
-    int64_t maxKey = iter2->first;
-
-    //写入时间戳、键值对个数和最小最大键
-    outFile.write((char *)(&timeStamp), sizeof(uint64_t));
-    outFile.write((char *)(&numPair), sizeof(uint64_t));
-    outFile.write((char *)(&minKey), sizeof(int64_t));
-    outFile.write((char *)(&maxKey), sizeof(int64_t));
-
-    //写入生成对应的布隆过滤器
-    bitset<81920> filter;
-    int64_t tempKey;
-    const char* tempValue;
-    unsigned int hash[4] = {0};
-    while(iter1!=newTable.end())
-    {
-        tempKey = iter1->first;
-        MurmurHash3_x64_128(&tempKey, sizeof(tempKey), 1, hash);
-        for(auto i:hash)
-            filter.set(i%81920);
-        iter1++;
-    }
-    outFile.write((char *)(&filter), sizeof(filter));
-
-    //索引区，计算key对应的索引值
-    const int dataArea = 10272 + numPair * 12;   //数据区开始的位置
-    uint32_t index = 0;
-    int length = 0;
-    iter1 = newTable.begin();
-    while(iter1!=newTable.end())
-    {
-        tempKey = iter1->first;
-        index = dataArea + length;
-        outFile.write((char *)(&tempKey), sizeof(int64_t));
-        outFile.write((char *)(&index), sizeof(uint32_t));
-        length += (iter1->second).size()+1;
-        iter1++;
-    }
-
-    //数据区，存放value
-    iter1 = newTable.begin();
-    while(iter1!=newTable.end())
-    {
-        tempValue = (iter1->second).c_str();
-        outFile.write(tempValue, sizeof(char)* ((iter1->second).size()));
-        tempValue = "\0";
-        outFile.write(tempValue, sizeof(char)* 1);
-        iter1++;
-    }
-    outFile.close();
-
-    Table newSSTable(FileName);
-    SSTable[level].insert(newSSTable) ;
-
+    SSTable[level].emplace(memoryPool, level, Level[level], timeStamp, numPair, newTable);
     newTable.clear();
 }

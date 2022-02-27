@@ -1,38 +1,33 @@
 #pragma once
 
-#include "kvstore_api.h"
 #include "Table.h"
-#include "SkipList.h"
 #include <map>
 #include <set>
 #include <queue>
 
 using namespace std;
 
-static inline int UpperNum(int i) {return pow(2, i+1);}
 const string DEL = "~DELETED~";
+inline int UpperNum(int i) {return pow(2, i+1);}
 
-class KVStore : public KVStoreAPI {
-	// You can add your implementation here
+class KVStore {
 private:
     SkipList *memTable;
-    string dir;
     vector<int> Level; //记录对应层的文件数目
     vector<set<Table>> SSTable;
+    MemoryManager memoryPool;
 public:
-	KVStore(const std::string &dir);
+	KVStore();
 
 	~KVStore();
 
-	void put(uint64_t key, const std::string &s) override;
+	void put(uint64_t key, const std::string &s);
 
-	std::string get(uint64_t key) override;
+	std::string get(uint64_t key);
 
-	bool del(uint64_t key) override;
-
-	void reset() override;
+	bool del(uint64_t key);
 
 	void compactionForLevel(int level);
 
-	void writeToFile(int level, uint64_t timeStamp, uint64_t numPair, map<int64_t, string> &newTable);
+	void writeToFile(int level, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable);
 };
