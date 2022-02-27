@@ -26,10 +26,10 @@ Table::Table(MemoryManager &pool, SkipList *memTable, int _num) {
     }
 
     //索引区，计算key对应的索引值，同时储存数据
-    const int dataArea = InitialSize + size * 12;   //数据区开始的位置
+    const unsigned dataArea = InitialSize + size * 12;   //数据区开始的位置
     uint32_t index = 0;
     node = memTable->GetFirstNode()->right;
-    int curlength = 0;
+    unsigned curlength = 0;
     while(node)
     {
         tempKey = node->key;
@@ -74,9 +74,9 @@ Table::Table(MemoryManager &pool, int _level, int _num, uint64_t timeStamp, uint
     }
 
     //索引区，计算key对应的索引值
-    const int dataArea = InitialSize + numPair * 12;   //数据区开始的位置
+    const unsigned dataArea = InitialSize + numPair * 12;   //数据区开始的位置
     uint32_t index = 0;
-    int curlength = 0;
+    unsigned curlength = 0;
     iter1 = newTable.begin();
     while(iter1!=newTable.end())
     {
@@ -95,7 +95,7 @@ Table::Table(MemoryManager &pool, int _level, int _num, uint64_t timeStamp, uint
 /**
  * 根据输入的key，寻找文件中有无对应的value
  */
-string Table::getValue(MemoryManager &pool, const uint64_t key) const{
+string Table::getValue(MemoryManager &pool, uint64_t key) const{
     if(key<MinMaxKey[0] || key>MinMaxKey[1])
         return "";
     //通过布隆过滤器判断key是否存在，如果有其中一个bit为0，则证明不存在
@@ -112,7 +112,7 @@ string Table::getValue(MemoryManager &pool, const uint64_t key) const{
     auto iter2 = offset.find(key);
     iter2++;
 
-    const int dataArea = InitialSize + TimeAndNum[1] * 12;
+    const unsigned dataArea = InitialSize + TimeAndNum[1] * 12;
     uint64_t len = iter2!=offset.end()? (iter2->second-iter1->second):(dataArea + dataLength - iter1->second);
 
     pool.readTable(level, num, iter1->second, len);
@@ -124,10 +124,10 @@ string Table::getValue(MemoryManager &pool, const uint64_t key) const{
 //遍历文件，将键值对全部读进内存
 void Table::traverse(MemoryManager &pool, map<uint64_t, string> &pair) const{
     pair = keyValue;
-    const int dataArea = InitialSize + TimeAndNum[1] * 12;
+    const unsigned dataArea = InitialSize + TimeAndNum[1] * 12;
     pool.readTable(level, num, dataArea, dataLength);
 }
 
-void Table::clear(MemoryManager &pool) {
+void Table::clear(MemoryManager &pool) const {
     pool.deleteTable(level, num);
 }

@@ -210,8 +210,8 @@ static void update_page_lifetime_class(struct ssd *ssd, uint64_t lpn)
         QTAILQ_INSERT_HEAD(&lm->classes[lc], pg, lru);
         old_lc = pg->lc;
         pg->lc = lc;
-        ftl_debug("Changing page lifetime class: LPN %lu, old class %d, new class %d\n",
-                pg->lpn, old_lc, lc);
+        //ftl_debug("Changing page lifetime class: LPN %lu, old class %d, new class %d\n",
+        //        pg->lpn, old_lc, lc);
         if (lm->pg_cnts[lc] < lm->max_pgs[lc]) {
             lm->pg_cnts[lc]++;
             break;

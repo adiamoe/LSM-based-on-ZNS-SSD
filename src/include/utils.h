@@ -8,6 +8,7 @@
 #include <cmath>
 #include <map>
 #include <vector>
+#include <iostream>
 
 const int MEMTABLE = (int) pow(2, 21);
 const uint64_t SSD_SIZE (8ULL * 1024 * 1024 * 1024);

@@ -2,10 +2,10 @@
 
 class correctnessTest : public Test {
 private:
-    const int Min = 1024 * 10;
+    const int Min = 1024 * 20;
     const int Max = 1024 * 30;
 
-    void regular_test(int Max) {
+    void regular_test() {
 
         int i;
 
@@ -32,7 +32,7 @@ public:
 
     void start_test() override {
         std::cout << "KVStore Correctness Test" << std::endl;
-        regular_test(Max);
+        regular_test();
     }
 };
 
