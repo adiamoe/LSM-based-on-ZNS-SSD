@@ -1,18 +1,43 @@
-#include <kvstore.h>
+#include "test.h"
 
-const int Max = 1024*32;
+class correctnessTest : public Test {
+private:
+    const int Min = 1024 * 10;
+    const int Max = 1024 * 30;
 
-int main()
-{
-    KVStore store;
-    int i=0;
-    for (i = 0; i < Max; ++i) {
-        store.put(i, std::string(i+1, 's'));
+    void regular_test(int Max) {
+
+        int i;
+
+        for (i = Min; i < Max; ++i) {
+            store.put(i, std::string(i + 1, 's'));
+            EXPECT(std::string(i + 1, 's'), store.get(i));
+        }
+        phase();
+
+        for (i = Min + 1; i < Max; i += 4) {
+            store.put(i, std::string(i + 1, 't'));
+            EXPECT(std::string(i + 1, 't'), store.get(i));
+            EXPECT(std::string(i, 's'), store.get(i - 1));
+        }
+        phase();
+
+        for (i = Min; i < Max; i += 2)
+            EXPECT(std::string(i + 1, 's'), store.get(i));
+        phase();
     }
-    for (i = 1; i < Max; i+=4) {
-        store.put(i, std::string(i+1, 't'));
+
+public:
+    correctnessTest() : Test() {}
+
+    void start_test() override {
+        std::cout << "KVStore Correctness Test" << std::endl;
+        regular_test(Max);
     }
-    for (i = 0; i < Max; i+=2)
-        store.get(i);
+};
+
+int main() {
+    correctnessTest test;
+    test.start_test();
     return 0;
 }
