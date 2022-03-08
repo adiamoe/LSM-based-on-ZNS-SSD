@@ -10,7 +10,7 @@
 #include <bitset>
 #include <iostream>
 
-const int InitialSize = 10272;  //元信息+过滤器长度
+const uint64_t InitialSize = 7*4+10240;  //元信息+过滤器长度
 using namespace std;
 
 struct Node{

@@ -1,16 +1,16 @@
 #include "Table.h"
 
-Table::Table(MemoryManager &pool, SkipList *memTable, int _num) {
-    level = 0;
-    num = _num;
+Table::Table(MemoryManager &pool, SkipList *memTable, int order) {
+    metaInfo.level = 0;
+    metaInfo.order = order;
     Node *node = memTable->GetFirstNode()->right;
 
-    TimeAndNum[0] = memTable->getTimeStamp();
+    metaInfo.timeStamp = memTable->getTimeStamp();
     uint64_t size = memTable->getSize();
-    TimeAndNum[1] = size;
+    metaInfo.pairNum = size;
     auto min_max = memTable->getMinMaxKey();
-    MinMaxKey[0] = min_max.first;
-    MinMaxKey[1] = min_max.second;
+    minMaxKey[0] = min_max.first;
+    minMaxKey[1] = min_max.second;
 
     //写入生成对应的布隆过滤器
     uint64_t tempKey;
@@ -21,7 +21,7 @@ Table::Table(MemoryManager &pool, SkipList *memTable, int _num) {
         tempKey = node->key;
         MurmurHash3_x64_128(&tempKey, sizeof(tempKey), 1, hash);
         for(auto i:hash)
-            BloomFilter.set(i%81920);
+            bloomFilter.set(i%81920);
         node = node->right;
     }
 
@@ -40,14 +40,14 @@ Table::Table(MemoryManager &pool, SkipList *memTable, int _num) {
         node = node->right;
     }
 
-    dataLength = curlength;
-    pool.writeTable(0, num);
+    metaInfo.dataLength = curlength;
+    pool.writeTable(0, order);
     memTable->clear();
 }
 
-Table::Table(MemoryManager &pool, int _level, int _num, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable) {
-    level = _level;
-    num = _num;
+Table::Table(MemoryManager &pool, int level, int order, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable) {
+    metaInfo.level = level;
+    metaInfo.order = order;
 
     auto iter1 = newTable.begin();
     uint64_t minKey = iter1->first;
@@ -55,10 +55,10 @@ Table::Table(MemoryManager &pool, int _level, int _num, uint64_t timeStamp, uint
     uint64_t maxKey = iter2->first;
 
     //写入时间戳、键值对个数和最小最大键
-    TimeAndNum[0] = timeStamp;
-    TimeAndNum[1] = numPair;
-    MinMaxKey[0] = minKey;
-    MinMaxKey[1] = maxKey;
+    metaInfo.timeStamp = timeStamp;
+    metaInfo.pairNum = numPair;
+    minMaxKey[0] = minKey;
+    minMaxKey[1] = maxKey;
 
     //写入生成对应的布隆过滤器
     uint64_t tempKey;
@@ -69,7 +69,7 @@ Table::Table(MemoryManager &pool, int _level, int _num, uint64_t timeStamp, uint
         tempKey = iter1->first;
         MurmurHash3_x64_128(&tempKey, sizeof(tempKey), 1, hash);
         for(auto i:hash)
-            BloomFilter.set(i%81920);
+            bloomFilter.set(i%81920);
         iter1++;
     }
 
@@ -88,21 +88,21 @@ Table::Table(MemoryManager &pool, int _level, int _num, uint64_t timeStamp, uint
         iter1++;
     }
 
-    dataLength = curlength;
-    pool.writeTable(level, num);
+    metaInfo.dataLength = curlength;
+    pool.writeTable(level, order);
 }
 
 /**
  * 根据输入的key，寻找文件中有无对应的value
  */
 string Table::getValue(MemoryManager &pool, uint64_t key) const{
-    if(key<MinMaxKey[0] || key>MinMaxKey[1])
+    if(key<minMaxKey[0] || key>minMaxKey[1])
         return "";
     //通过布隆过滤器判断key是否存在，如果有其中一个bit为0，则证明不存在
     unsigned int hash[4] = {0};
     MurmurHash3_x64_128(&key, sizeof(key), 1, hash);
     for(unsigned int i : hash)
-        if(!BloomFilter[i%81920])
+        if(!bloomFilter[i%81920])
             return "";
 
     //再在键值对中进行查找
@@ -112,10 +112,10 @@ string Table::getValue(MemoryManager &pool, uint64_t key) const{
     auto iter2 = offset.find(key);
     iter2++;
 
-    const unsigned dataArea = InitialSize + TimeAndNum[1] * 12;
-    uint64_t len = iter2!=offset.end()? (iter2->second-iter1->second):(dataArea + dataLength - iter1->second);
+    const unsigned dataArea = InitialSize + metaInfo.pairNum * 12;
+    uint64_t len = iter2!=offset.end()? (iter2->second-iter1->second):(dataArea + metaInfo.dataLength - iter1->second);
 
-    pool.readTable(level, num, iter1->second, len);
+    pool.getValue(metaInfo.level, metaInfo.order, iter1->second, len);
 
     string ans = keyValue.find(key)->second;
     return ans;
@@ -124,10 +124,10 @@ string Table::getValue(MemoryManager &pool, uint64_t key) const{
 //遍历文件，将键值对全部读进内存
 void Table::traverse(MemoryManager &pool, map<uint64_t, string> &pair) const{
     pair = keyValue;
-    const unsigned dataArea = InitialSize + TimeAndNum[1] * 12;
-    pool.readTable(level, num, dataArea, dataLength);
+    const unsigned dataArea = InitialSize + metaInfo.pairNum * 12;
+    pool.readTable(metaInfo.level, metaInfo.order, dataArea, metaInfo.dataLength);
 }
 
 void Table::clear(MemoryManager &pool) const {
-    pool.deleteTable(level, num);
+    pool.deleteTable(metaInfo.level, metaInfo.order);
 }

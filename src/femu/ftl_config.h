@@ -1,7 +1,7 @@
 #ifndef __ACTIVE_FTL_H
 #define __ACTIVE_FTL_H
 
-#define USE_LIFETIME_FTL
+//#define USE_LIFETIME_FTL
 
 /* default: 8GB, 6.25% OP */
 #define SSD_SECSZ       512

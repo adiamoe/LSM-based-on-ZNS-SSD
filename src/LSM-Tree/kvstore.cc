@@ -32,7 +32,7 @@ void KVStore::put(uint64_t key, const string &s)
     else
         memTable->memory += 4 + 8 + s.size() + 1;  //索引值 + key + value所占的内存大小 + "\0"
 
-    if(memTable->memory > MEMTABLE)
+    if(memTable->memory > DEFAULT_SSTABLE_SIZE)
     {
         Level[0]++;
         SSTable[0].emplace(memoryPool, memTable, Level[0]);
@@ -180,7 +180,7 @@ void KVStore::compactionForLevel(int level)
 
     vector<map<uint64_t, string>> KVToCompact;                   //被合并的键值对，下标越大时间戳越大
     vector<map<uint64_t, string>::iterator> KVToCompactIter;     //键值对迭代器
-    int size = InitialSize;
+    uint64_t size = InitialSize;
     map<uint64_t, int> minKey;                      //minKey中只存放num个数据，分别为各个SSTable中最小键和对应的SSTable
     uint64_t tempKey;
     int index;                                      //对应的SSTable序号
@@ -225,7 +225,7 @@ void KVStore::compactionForLevel(int level)
         if(lastLevel && tempValue == DEL)    //最后一层的删除标记不写入文件
             goto next;
         size += tempValue.size() + 1 + 12;
-        if(size > MEMTABLE)
+        if(size > DEFAULT_SSTABLE_SIZE)
         {
             writeToFile(level, timestamp, newTable.size(), newTable);
             size = InitialSize + tempValue.size() + 1 + 12;
