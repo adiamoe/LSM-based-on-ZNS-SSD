@@ -193,6 +193,15 @@ struct write_pointer {
     int pl;
 };
 
+struct zns_write_pointer {
+    int FCGid;
+    int ch;
+    int lun;
+    int pg;
+    int blk;
+    int pl;
+};
+
 struct line_mgmt {
     struct line *lines;
     /* free line list, we only need to maintain a list of blk numbers */
@@ -229,6 +238,29 @@ struct ssd {
 };
 
 void ssd_init(FemuCtrl *n);
+
+void zns_init(FemuCtrl *n);
+
+#define ZONE_SIZE 1024 * 1024 * 64;
+
+typedef enum NvmeZoneState {
+    NVME_ZONE_STATE_EMPTY            ,
+    NVME_ZONE_STATE_OPEN             ,
+    NVME_ZONE_STATE_FULL             ,
+} NvmeZoneState;
+
+typedef struct NvmeZoneDescr {
+    NvmeZoneState   state;
+    uint64_t        start_lba;
+    uint64_t        zone_cap;
+} NvmeZoneDescr;
+
+typedef struct NvmeZone {
+    NvmeZoneDescr           d;
+    uint64_t                write_ptr;
+    struct zns_write_pointer    wpp;
+    QTAILQ_ENTRY(NvmeZone)  entry;
+} NvmeZone;
 
 #ifdef FEMU_DEBUG_FTL
 #define ftl_debug(fmt, ...) \

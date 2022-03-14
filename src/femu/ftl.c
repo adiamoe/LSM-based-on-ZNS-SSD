@@ -6,6 +6,19 @@
 
 static void *ftl_thread(void *arg);
 
+static inline uint32_t zns_zone_idx(FemuCtrl *n, uint64_t slba)
+{
+    return slba / n->zone_size;
+}
+
+static inline NvmeZone *zns_get_zone_by_lba(FemuCtrl *n, uint64_t slba)
+{
+    uint32_t zone_idx = zns_zone_idx(n, slba);
+
+    assert(zone_idx < n->num_zones);
+    return &n->zone_array[zone_idx];
+}
+
 static inline bool should_gc(struct ssd *ssd)
 {
     return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines);
@@ -156,6 +169,26 @@ static struct line *get_next_free_line(struct ssd *ssd)
     return curline;
 }
 
+static void zns_advance_write_pointer(int num_fcg, NvmeZone *zone, struct ssd *ssd) {
+    struct ssdparams *spp = &ssd->sp;
+    struct zns_write_pointer *wpp = &zone->wpp;
+
+    int nchs = spp->nchs / num_fcg;
+
+    wpp->ch++;
+    if(wpp->ch % nchs == 0) {
+        wpp->ch = nchs * wpp->FCGid;
+        wpp->blk++;
+        if(wpp->blk == spp->blks_per_pl) {
+            wpp->blk = 0;
+            wpp->pg++;
+            if(wpp->pg == spp->pgs_per_blk) {
+                zone->d.state = NVME_ZONE_STATE_FULL;
+            }
+        }
+    }
+}
+
 static void ssd_advance_write_pointer(struct ssd *ssd)
 {
     struct ssdparams *spp = &ssd->sp;
@@ -208,6 +241,19 @@ static void ssd_advance_write_pointer(struct ssd *ssd)
             }
         }
     }
+}
+
+static struct ppa get_zns_page(NvmeZone *zone) {
+    struct write_pointer *wpp = &zone->wpp;
+    struct ppa ppa;
+    ppa.ppa = 0;
+    ppa.g.ch = wpp->ch;
+    ppa.g.lun = wpp->lun;
+    ppa.g.pg = wpp->pg;
+    ppa.g.blk = wpp->blk;
+    ppa.g.pl = wpp->pl;
+
+    return ppa;
 }
 
 static struct ppa get_new_page(struct ssd *ssd)
@@ -400,6 +446,35 @@ void ssd_init(FemuCtrl *n)
     ssd_init_write_pointer(ssd);
 
     assert(pthread_create(&ssd->ftl_thread, NULL, ftl_thread, n) == 0);
+}
+
+void zns_init(FemuCtrl *n) {
+    struct ssdparams *spp = &n->ssd->sp;
+    n->zone_size = ZONE_SIZE;
+    n->num_zones = n->devsz / n->zone_size;
+    n->num_fcg = NUM_FCGS;
+    uint64_t start = 0, zone_size = n->zone_size;
+    uint64_t block_size = spp->secsz * spp->secs_per_pg * spp->pgs_per_blk;
+    NvmeZone *zone;
+    int i;
+
+    n->zone_array = g_malloc0((n->num_zones) * sizeof(NvmeZone));
+    zone = n->zone_array;
+    for (i = 0; i < n->num_zones; i++, zone++) {
+        zone->d.state = NVME_ZONE_STATE_EMPTY;
+        zone->write_ptr = start;
+        zone->d.start_lba = start;
+        zone->d.zone_cap = zone_size;
+        start += zone_size;
+
+        struct zns_write_pointer *page = &zone->wpp;
+        page->FCGid = i % 2;
+        page->ch = (spp->nchs / 2) * (i % 2);
+        page->lun = i % (spp->blks_per_pl / (zone_size / block_size / spp->nchs * 2) * 2);
+        page->blk = 0;
+        page->pg = 0;
+        page->pl = 0;
+    }
 }
 
 static inline bool valid_ppa(struct ssd *ssd, struct ppa *ppa)
@@ -778,15 +853,53 @@ static int do_gc(struct ssd *ssd, bool force)
     return 0;
 }
 
-static uint64_t ssd_read(struct ssd *ssd, NvmeRequest *req)
-{
+static bool get_next_page(int num_fcg, struct ssd *ssd, struct ppa *page) {
     struct ssdparams *spp = &ssd->sp;
-    uint64_t lba = req->slba;
-    int nsecs = req->nlb;
+
+    int nchs = spp->nchs / num_fcg;
+
+    page->g.ch++;
+    if(page->g.ch % nchs == 0) {
+        page->g.ch = page->g.ch / nchs - 1;
+        page->g.blk++;
+        if(page->g.blk == spp->blks_per_pl) {
+            page->g.blk = 0;
+            page->g.pg++;
+            if(page->g.pg == spp->pgs_per_blk) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+//todo:test
+static struct ppa locate_page(int num_fcg, struct ssdparams *spp, NvmeZone *zone, uint64_t start_lpn) {
     struct ppa ppa;
-    uint64_t start_lpn = lba / spp->secs_per_pg;
-    uint64_t end_lpn = (lba + nsecs - 1) / spp->secs_per_pg;
-    uint64_t lpn;
+    int num_chip = spp->nchs / num_fcg;
+    ppa.g.ch = (start_lpn % num_chip) + zone->wpp.FCGid * num_chip;
+    ppa.g.lun = zone->wpp.lun;
+    ppa.g.blk = (start_lpn / spp->pgs_per_blk) / num_chip;
+    ppa.g.pg = start_lpn % spp->pgs_per_blk;
+    ppa.g.pl = 0;
+    return ppa;
+}
+
+static uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
+    uint64_t slba = req->slba;
+    uint16_t nlb = req->nlb;
+    NvmeZone *zone_start = zns_get_zone_by_lba(n, slba);
+    NvmeZone *zone_end = zns_get_zone_by_lba(n, slba + nlb);
+
+    struct ssd *ssd = n->ssd;
+    struct ssdparams *spp = &ssd->sp;
+
+    uint64_t start_lpn = slba / spp->secs_per_pg;
+    uint64_t end_lpn = (slba + nlb - 1) / spp->secs_per_pg;
+    start_lpn %= (n->zone_size / (spp->secs_per_pg * spp->secsz));
+
+    struct ppa ppa = locate_page(n->num_fcg, spp, zone_start, slba);
+
     uint64_t sublat, maxlat = 0;
 
     if (end_lpn >= spp->tt_pgs) {
@@ -794,78 +907,75 @@ static uint64_t ssd_read(struct ssd *ssd, NvmeRequest *req)
     }
 
     /* normal IO read path */
-    for (lpn = start_lpn; lpn <= end_lpn; lpn++) {
-        ppa = get_maptbl_ent(ssd, lpn);
-        if (!mapped_ppa(&ppa) || !valid_ppa(ssd, &ppa)) {
-            //printf("%s,lpn(%" PRId64 ") not mapped to valid ppa\n", ssd->ssdname, lpn);
-            //printf("Invalid ppa,ch:%d,lun:%d,blk:%d,pl:%d,pg:%d,sec:%d\n",
-            //ppa.g.ch, ppa.g.lun, ppa.g.blk, ppa.g.pl, ppa.g.pg, ppa.g.sec);
-            continue;
-        }
-
+    for (uint64_t lpn = start_lpn; lpn <= end_lpn; lpn++) {
         struct nand_cmd srd;
         srd.type = USER_IO;
         srd.cmd = NAND_READ;
         srd.stime = req->stime;
         sublat = ssd_advance_status(ssd, &ppa, &srd);
+
+        if(get_next_page(n->num_fcg, ssd, &ppa) && zone_start != zone_end) {
+            zone_start++;
+            ppa = locate_page(n->num_fcg, spp, zone_start, 0);
+        }
+
         maxlat = (sublat > maxlat) ? sublat : maxlat;
     }
 
     return maxlat;
 }
 
-static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
-{
-    uint64_t lba = req->slba;
+static void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uint16_t nlb) {
+    struct ssd *ssd = n->ssd;
     struct ssdparams *spp = &ssd->sp;
-    int len = req->nlb;
-    uint64_t start_lpn = lba / spp->secs_per_pg;
-    uint64_t end_lpn = (lba + len - 1) / spp->secs_per_pg;
+
+    if(slba + nlb > spp->tt_secs)
+        ftl_err("start_lpn=%"PRIu64",tt_pgs=%d\n", slba, spp->tt_secs);
+
+    if(slba + nlb > zone->d.start_lba+zone->d.zone_cap)
+        ftl_err("NVME_ZONE_BOUNDARY_ERROR");
+
+    if(zone->d.state == NVME_ZONE_STATE_FULL)
+        ftl_err("NVME_ZONE_FULL");
+
+    if(zone->write_ptr != slba)
+        ftl_err("NVME_ZONE_INVALID_WRITE");
+}
+
+
+static uint64_t zns_write(FemuCtrl *n, NvmeRequest *req) {
+    uint64_t slba = req->slba;
+    uint16_t nlb = req->nlb;
+    uint8_t num_fcg = n->num_fcg;
+    NvmeZone *zone = zns_get_zone_by_lba(n, slba);
+
+    zns_check_zone_write(n, zone, slba, nlb);
+
+    //update zns writer pointer
+    zone->write_ptr += nlb;
+
+    struct ssd *ssd = n->ssd;
+    struct ssdparams *spp = &ssd->sp;
+    uint64_t start_lpn = slba / spp->secs_per_pg;
+    uint64_t end_lpn = (slba + nlb - 1) / spp->secs_per_pg;
     struct ppa ppa;
     uint64_t lpn;
     uint64_t curlat = 0, maxlat = 0;
     int r;
 
-    if (end_lpn >= spp->tt_pgs) {
-        ftl_err("start_lpn=%"PRIu64",tt_pgs=%d\n", start_lpn, ssd->sp.tt_pgs);
-    }
-
-    while (should_gc_high(ssd)) {
-        /* perform GC here until !should_gc(ssd) */
-        r = do_gc(ssd, true);
-        if (r == -1)
-            break;
-    }
-
     for (lpn = start_lpn; lpn <= end_lpn; lpn++) {
-        ppa = get_maptbl_ent(ssd, lpn);
-        if (mapped_ppa(&ppa)) {
-            /* update old page information first */
-            mark_page_invalid(ssd, &ppa);
-            set_rmap_ent(ssd, INVALID_LPN, &ppa);
-        }
 
-        /* new write */
-        ppa = get_new_page(ssd);
-        /* update maptbl */
-        set_maptbl_ent(ssd, lpn, &ppa);
-        /* update rmap */
-        set_rmap_ent(ssd, lpn, &ppa);
+        ppa = get_zns_page(zone);
 
-        mark_page_valid(ssd, &ppa);
-
-        /* need to advance the write pointer here */
-        ssd_advance_write_pointer(ssd);
+        zns_advance_write_pointer(num_fcg, zone, ssd);
 
         struct nand_cmd swr;
         swr.type = USER_IO;
         swr.cmd = NAND_WRITE;
         swr.stime = req->stime;
-        /* get latency statistics */
         curlat = ssd_advance_status(ssd, &ppa, &swr);
         maxlat = (curlat > maxlat) ? curlat : maxlat;
     }
-
     return maxlat;
 }
 
@@ -899,10 +1009,10 @@ static void *ftl_thread(void *arg)
             ftl_assert(req);
             switch (req->cmd.opcode) {
             case NVME_CMD_WRITE:
-                lat = ssd_write(ssd, req);
+                lat = zns_write(n, req);
                 break;
             case NVME_CMD_READ:
-                lat = ssd_read(ssd, req);
+                lat = zns_read(n, req);
                 break;
             case NVME_CMD_DSM:
                 lat = 0;

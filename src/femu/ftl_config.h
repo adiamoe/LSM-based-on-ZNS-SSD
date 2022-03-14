@@ -7,7 +7,7 @@
 #define SSD_SECSZ       512
 #define SSD_SECS_PER_PG 8
 #define SSD_PGS_PER_BLK 256
-#define SSD_BLKS_PER_PL 136
+#define SSD_BLKS_PER_PL 128
 #define SSD_PLS_PER_LUN 1
 #define SSD_LUNS_PER_CH 8
 #define SSD_NCHS        8
@@ -23,5 +23,7 @@
 
 /* 1GB */
 #define SSD_WRITE_BUFFER_SIZE (1ULL * 1024 * 1024 * 1024)
+
+#define NUM_FCGS 2
 
 #endif

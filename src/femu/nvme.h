@@ -49,9 +49,13 @@ typedef struct NvmeRequest {
 } NvmeRequest;
 
 typedef struct FemuCtrl {
+    struct NvmeZone      *zone_array;
     struct ssd           *ssd;
     void                 *backend;
     uint64_t             devsz;
+    uint64_t             zone_size;
+    uint32_t             num_zones;
+    uint8_t              num_fcg;
 
     bool                 enable_latency;
 

@@ -137,6 +137,7 @@ struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_lat
     femu->ssd->dataplane_started_ptr = &femu->dataplane_started;
 
     ssd_init(femu);
+    zns_init(femu);
 
     femu->dataplane_started = true;
 
