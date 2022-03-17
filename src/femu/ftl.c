@@ -179,8 +179,10 @@ static void zns_advance_write_pointer(int num_fcg, NvmeZone *zone, struct ssd *s
     if(wpp->ch % nchs == 0) {
         wpp->ch = nchs * wpp->FCGid;
         wpp->blk++;
-        if(wpp->blk == spp->blks_per_pl) {
-            wpp->blk = 0;
+        uint64_t block_size = spp->pgs_per_blk * spp->secs_per_pg * spp->secsz;
+        int end = zone->d.zone_cap / block_size / (spp->nchs / num_fcg);
+        if(wpp->blk % end == 0) {
+            wpp->blk = ((int)(zone->d.zone_cap / block_size / (spp->nchs / num_fcg)) * (zone->ZoneID / num_fcg)) % spp->blks_per_pl;
             wpp->pg++;
             if(wpp->pg == spp->pgs_per_blk) {
                 zone->d.state = NVME_ZONE_STATE_FULL;
@@ -455,12 +457,14 @@ void zns_init(FemuCtrl *n) {
     n->num_fcg = NUM_FCGS;
     uint64_t start = 0, zone_size = n->zone_size;
     uint64_t block_size = spp->secsz * spp->secs_per_pg * spp->pgs_per_blk;
+    uint8_t num_fcg = n->num_fcg;
     NvmeZone *zone;
     int i;
 
     n->zone_array = g_malloc0((n->num_zones) * sizeof(NvmeZone));
     zone = n->zone_array;
     for (i = 0; i < n->num_zones; i++, zone++) {
+        zone->ZoneID = i;
         zone->d.state = NVME_ZONE_STATE_EMPTY;
         zone->write_ptr = start;
         zone->d.start_lba = start;
@@ -468,10 +472,10 @@ void zns_init(FemuCtrl *n) {
         start += zone_size;
 
         struct zns_write_pointer *page = &zone->wpp;
-        page->FCGid = i % 2;
-        page->ch = (spp->nchs / 2) * (i % 2);
-        page->lun = i % (spp->blks_per_pl / (zone_size / block_size / spp->nchs * 2) * 2);
-        page->blk = 0;
+        page->FCGid = i % num_fcg;
+        page->ch = (spp->nchs / num_fcg) * (i % num_fcg);
+        page->lun = i / (spp->blks_per_pl * block_size * spp->nchs / zone_size);
+        page->blk = ((int)(zone_size / block_size / (spp->nchs / num_fcg)) * (i / num_fcg)) % spp->blks_per_pl;
         page->pg = 0;
         page->pl = 0;
     }
@@ -853,7 +857,7 @@ static int do_gc(struct ssd *ssd, bool force)
     return 0;
 }
 
-static bool get_next_page(int num_fcg, struct ssd *ssd, struct ppa *page) {
+static bool get_next_page(NvmeZone *zone, int num_fcg, struct ssd *ssd, struct ppa *page) {
     struct ssdparams *spp = &ssd->sp;
 
     int nchs = spp->nchs / num_fcg;
@@ -862,8 +866,10 @@ static bool get_next_page(int num_fcg, struct ssd *ssd, struct ppa *page) {
     if(page->g.ch % nchs == 0) {
         page->g.ch = page->g.ch / nchs - 1;
         page->g.blk++;
-        if(page->g.blk == spp->blks_per_pl) {
-            page->g.blk = 0;
+        uint64_t block_size = spp->pgs_per_blk * spp->secs_per_pg * spp->secsz;
+        int end = zone->d.zone_cap / block_size / (spp->nchs / num_fcg);
+        if(page->g.blk % end == 0) {
+            page->g.blk = ((int)(zone->d.zone_cap / block_size / (spp->nchs / num_fcg)) * (zone->ZoneID / num_fcg)) % spp->blks_per_pl;
             page->g.pg++;
             if(page->g.pg == spp->pgs_per_blk) {
                 return true;
@@ -886,8 +892,8 @@ static struct ppa locate_page(int num_fcg, struct ssdparams *spp, NvmeZone *zone
 }
 
 static uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
-    uint64_t slba = req->slba;
-    uint16_t nlb = req->nlb;
+    uint64_t slba = req->slba[0];
+    uint16_t nlb = req->nlb[0];
     NvmeZone *zone_start = zns_get_zone_by_lba(n, slba);
     NvmeZone *zone_end = zns_get_zone_by_lba(n, slba + nlb);
 
@@ -914,7 +920,7 @@ static uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
         srd.stime = req->stime;
         sublat = ssd_advance_status(ssd, &ppa, &srd);
 
-        if(get_next_page(n->num_fcg, ssd, &ppa) && zone_start != zone_end) {
+        if(get_next_page(zone_start, n->num_fcg, ssd, &ppa) && zone_start != zone_end) {
             zone_start++;
             ppa = locate_page(n->num_fcg, spp, zone_start, 0);
         }
@@ -944,8 +950,8 @@ static void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uin
 
 
 static uint64_t zns_write(FemuCtrl *n, NvmeRequest *req) {
-    uint64_t slba = req->slba;
-    uint16_t nlb = req->nlb;
+    uint64_t slba = req->slba[0];
+    uint16_t nlb = req->nlb[0];
     uint8_t num_fcg = n->num_fcg;
     NvmeZone *zone = zns_get_zone_by_lba(n, slba);
 

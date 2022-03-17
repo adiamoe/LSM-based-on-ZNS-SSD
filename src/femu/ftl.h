@@ -241,7 +241,7 @@ void ssd_init(FemuCtrl *n);
 
 void zns_init(FemuCtrl *n);
 
-#define ZONE_SIZE 1024 * 1024 * 64;
+#define ZONE_SIZE 1024 * 1024 * 64
 
 typedef enum NvmeZoneState {
     NVME_ZONE_STATE_EMPTY            ,
@@ -256,6 +256,7 @@ typedef struct NvmeZoneDescr {
 } NvmeZoneDescr;
 
 typedef struct NvmeZone {
+    int                     ZoneID;
     NvmeZoneDescr           d;
     uint64_t                write_ptr;
     struct zns_write_pointer    wpp;

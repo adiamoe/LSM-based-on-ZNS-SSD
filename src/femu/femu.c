@@ -69,6 +69,8 @@ static void *femu_poller(void *arg)
     }
 }
 
+
+//并行性的问题
 static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *arg, int op)
 {
     uint64_t id = alloc_req_id(femu);
@@ -77,16 +79,44 @@ static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *a
     uint64_t end_lba = (offset + len) / secsz;
     int poller_index = 0; /* need to support multiple pollers in the future */
     NvmeRequest req;
+    req.slba = g_malloc0(sizeof(uint64_t));
+    req.nlb = g_malloc0(sizeof(uint16_t));
     int ret;
-
-    if ((offset + len) % secsz != 0)
-        end_lba++;
-    assert(end_lba - start_lba > 0);
 
     memset(&req, 0, sizeof(NvmeRequest));
     req.id = id;
-    req.slba = start_lba;
-    req.nlb = end_lba - start_lba;
+    req.slba[0] = start_lba;
+    req.nlb[0] = end_lba - start_lba;
+    req.cmd.opcode = op;
+    req.stime = req.expire_time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    req.arg = arg;
+    req.completed = false;
+
+    do {
+        void *obj = &req;
+        ret = femu_ring_enqueue(femu->to_ftl[poller_index], &obj, 1);
+    } while (ret != 1);
+
+    /* wait until the request finishes */
+    while (!req.completed);
+}
+
+static void reset(struct FemuCtrl *femu, const size_t len[], off_t offset[], void *arg, int op, int n)
+{
+    uint64_t id = alloc_req_id(femu);
+    uint64_t secsz = femu->ssd->sp.secsz;
+    int poller_index = 0; /* need to support multiple pollers in the future */
+    NvmeRequest req;
+    req.slba = g_malloc0(sizeof(uint64_t) * n);
+    req.nlb = g_malloc0(sizeof(uint16_t) * n);
+    int ret;
+
+    memset(&req, 0, sizeof(NvmeRequest));
+    req.id = id;
+    for(int i=0; i<n; i++) {
+        req.slba[i] = offset[i] / secsz;
+        req.nlb[i] = len[i] / secsz;
+    }
     req.cmd.opcode = op;
     req.stime = req.expire_time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     req.arg = arg;
@@ -162,4 +192,16 @@ int femu_write(struct FemuCtrl *femu, const void *buf, size_t len, off_t offset,
     dispatch_io(femu, len, offset, arg, NVME_CMD_WRITE);
 
     return 0;
+}
+
+int femu_reset(struct FemuCtrl *femu, const void *buf, size_t len[], off_t offset[], void *arg, int n) {
+
+    reset(femu, len, offset, arg, NVME_CMD_RESET, n);
+
+    return 0;
+}
+
+void get_zns_meta(uint64_t *meta) {
+    meta[0] = ZONE_SIZE;
+    meta[1] = NUM_FCGS;
 }
