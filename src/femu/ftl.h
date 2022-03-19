@@ -84,21 +84,9 @@ struct ppa {
     };
 };
 
-typedef int nand_sec_status_t;
-
-struct nand_page {
-    nand_sec_status_t *sec;
-    int nsecs;
-    int status;
-};
-
 struct nand_block {
-    struct nand_page *pg;
     int npgs;
-    int ipc; /* invalid page count */
-    int vpc; /* valid page count */
     int erase_cnt;
-    int wp; /* current write pointer */
 };
 
 struct nand_plane {
@@ -202,19 +190,6 @@ struct zns_write_pointer {
     int pl;
 };
 
-struct line_mgmt {
-    struct line *lines;
-    /* free line list, we only need to maintain a list of blk numbers */
-    QTAILQ_HEAD(free_line_list, line) free_line_list;
-    pqueue_t *victim_line_pq;
-    //QTAILQ_HEAD(victim_line_list, line) victim_line_list;
-    QTAILQ_HEAD(full_line_list, line) full_line_list;
-    int tt_lines;
-    int free_line_cnt;
-    int victim_line_cnt;
-    int full_line_cnt;
-};
-
 struct nand_cmd {
     int type;
     int cmd;
@@ -225,10 +200,7 @@ struct ssd {
     char *ssdname;
     struct ssdparams sp;
     struct ssd_channel *ch;
-    struct ppa *maptbl; /* page level mapping table */
-    uint64_t *rmap;     /* reverse mapptbl, assume it's stored in OOB */
     struct write_pointer wp;
-    struct line_mgmt lm;
 
     /* lockless ring for communication with NVMe IO thread */
     struct rte_ring **to_ftl;

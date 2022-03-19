@@ -35,8 +35,8 @@ typedef struct NvmeCmd {
 
 typedef struct NvmeRequest {
     uint64_t                id;
-    uint64_t                *slba;
-    uint16_t                *nlb;
+    uint64_t                slba;
+    uint16_t                nlb;
     NvmeCmd                 cmd;
     int64_t                 stime;
     int64_t                 reqlat;

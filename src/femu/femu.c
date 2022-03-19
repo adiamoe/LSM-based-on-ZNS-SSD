@@ -69,8 +69,6 @@ static void *femu_poller(void *arg)
     }
 }
 
-
-//并行性的问题
 static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *arg, int op)
 {
     uint64_t id = alloc_req_id(femu);
@@ -85,8 +83,8 @@ static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *a
 
     memset(&req, 0, sizeof(NvmeRequest));
     req.id = id;
-    req.slba[0] = start_lba;
-    req.nlb[0] = end_lba - start_lba;
+    req.slba = start_lba;
+    req.nlb = end_lba - start_lba;
     req.cmd.opcode = op;
     req.stime = req.expire_time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     req.arg = arg;
@@ -101,35 +99,6 @@ static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *a
     while (!req.completed);
 }
 
-static void reset(struct FemuCtrl *femu, const size_t len[], off_t offset[], void *arg, int op, int n)
-{
-    uint64_t id = alloc_req_id(femu);
-    uint64_t secsz = femu->ssd->sp.secsz;
-    int poller_index = 0; /* need to support multiple pollers in the future */
-    NvmeRequest req;
-    req.slba = g_malloc0(sizeof(uint64_t) * n);
-    req.nlb = g_malloc0(sizeof(uint16_t) * n);
-    int ret;
-
-    memset(&req, 0, sizeof(NvmeRequest));
-    req.id = id;
-    for(int i=0; i<n; i++) {
-        req.slba[i] = offset[i] / secsz;
-        req.nlb[i] = len[i] / secsz;
-    }
-    req.cmd.opcode = op;
-    req.stime = req.expire_time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-    req.arg = arg;
-    req.completed = false;
-
-    do {
-        void *obj = &req;
-        ret = femu_ring_enqueue(femu->to_ftl[poller_index], &obj, 1);
-    } while (ret != 1);
-
-    /* wait until the request finishes */
-    while (!req.completed);
-}
 
 struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_latency)
 {
@@ -174,29 +143,23 @@ struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_lat
     return femu;
 }
 
-int femu_read(struct FemuCtrl *femu, void *buf, size_t len, off_t offset, void *arg)
+int femu_read(struct FemuCtrl *femu, size_t len, off_t offset, void *arg)
 {
-    if (femu->backend != NULL)
-        memcpy(buf, femu->backend + offset, len);
-
     dispatch_io(femu, len, offset, arg, NVME_CMD_READ);
 
     return 0;
 }
 
-int femu_write(struct FemuCtrl *femu, const void *buf, size_t len, off_t offset, void *arg)
+int femu_write(struct FemuCtrl *femu, size_t len, off_t offset, void *arg)
 {
-    if (femu->backend != NULL)
-        memcpy(femu->backend + offset, buf, len);
-
     dispatch_io(femu, len, offset, arg, NVME_CMD_WRITE);
 
     return 0;
 }
 
-int femu_reset(struct FemuCtrl *femu, const void *buf, size_t len[], off_t offset[], void *arg, int n) {
+int femu_reset(struct FemuCtrl *femu, size_t len, off_t offset, void *arg) {
 
-    reset(femu, len, offset, arg, NVME_CMD_RESET, n);
+    dispatch_io(femu, len, offset, arg, NVME_CMD_RESET);
 
     return 0;
 }
@@ -204,4 +167,7 @@ int femu_reset(struct FemuCtrl *femu, const void *buf, size_t len[], off_t offse
 void get_zns_meta(uint64_t *meta) {
     meta[0] = ZONE_SIZE;
     meta[1] = NUM_FCGS;
+    uint64_t block_size = SSD_SECSZ * SSD_SECS_PER_PG * SSD_PGS_PER_BLK;
+    meta[2] = ZONE_SIZE / block_size / (SSD_NCHS / NUM_FCGS);   //每个zone在每个chip上占据的block数
+    meta[3] = SSD_BLKS_PER_PL / meta[2];                        //每个die可以容纳的zone数量
 }

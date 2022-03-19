@@ -12,9 +12,9 @@ extern "C"{
 struct FemuCtrl;
 
 struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_latency);
-int femu_read(struct FemuCtrl *femu, void *buf, size_t len, off_t offset, void *arg);
-int femu_write(struct FemuCtrl *femu, const void *buf, size_t len, off_t offset, void *arg);
-int femu_reset(struct FemuCtrl *femu, const void *buf, size_t len[], off_t offset[], void *arg, int n);
+int femu_read(struct FemuCtrl *femu, size_t len, off_t offset, void *arg);
+int femu_write(struct FemuCtrl *femu, size_t len, off_t offset, void *arg);
+int femu_reset(struct FemuCtrl *femu, size_t len, off_t offset, void *arg);
 void get_zns_meta(uint64_t *meta);
 
 #ifdef __cplusplus
