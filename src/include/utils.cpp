@@ -111,7 +111,6 @@ void MemoryManager::resetZone(int zone_order) {
 
     //利用率不足0.3时清空整个zone
     if(rate < 0.3) {
-        printf("resetZone\n");
         uint64_t zone_size = SSD_SIZE / zone_num;
         uint64_t start_table = meta.start;
         uint64_t end_table = meta.end;

@@ -77,8 +77,6 @@ static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *a
     uint64_t end_lba = (offset + len) / secsz;
     int poller_index = 0; /* need to support multiple pollers in the future */
     NvmeRequest req;
-    req.slba = g_malloc0(sizeof(uint64_t));
-    req.nlb = g_malloc0(sizeof(uint16_t));
     int ret;
 
     memset(&req, 0, sizeof(NvmeRequest));

@@ -355,15 +355,14 @@ static void zns_reset_wpp(NvmeZone *zone, struct ssdparams *spp, int num_fcg, ui
     int id = zone->ZoneID;
     page->FCGid = id % num_fcg;
     page->ch = (spp->nchs / num_fcg) * (id % num_fcg);
-    page->lun = id / (spp->blks_per_pl * block_size * spp->nchs / ZONE_SIZE);
-    page->blk = ((int)(ZONE_SIZE / block_size / (spp->nchs / num_fcg)) * (id / num_fcg)) % spp->blks_per_pl;
+    page->lun = id / (spp->blks_per_pl * block_size * spp->nchs / zone->d.zone_cap);
+    page->blk = ((zone->d.zone_cap / block_size / (spp->nchs / num_fcg)) * (id / num_fcg)) % spp->blks_per_pl;
     page->pg = 0;
     page->pl = 0;
     zone->d.state = NVME_ZONE_STATE_EMPTY;
 }
 
 static void zns_reset(FemuCtrl *n, NvmeRequest *req) {
-    printf("zns reset!\n");
     uint64_t slba = req->slba;
     uint8_t num_fcg = n->num_fcg;
     struct ssd *ssd = n->ssd;
