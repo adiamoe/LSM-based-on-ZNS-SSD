@@ -81,6 +81,10 @@ void MemoryManager::writeTable(int level, int num) {
     meta.valid_table_num++;
     if(meta.write_ptr >= meta.end) {
         full_zone.emplace(open_zone[which_zone]);
+        if(empty_zone.empty()) {
+            printf("Error, zones are all full\n");
+            exit(1);
+        }
         open_zone[which_zone] = empty_zone.front();
         empty_zone.pop();
     }

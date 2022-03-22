@@ -4,8 +4,6 @@
 
 #ifndef USE_LIFETIME_FTL
 
-static void *ftl_thread(void *arg);
-
 static inline uint32_t zns_zone_idx(FemuCtrl *n, uint64_t slba, struct ssdparams *spp)
 {
     return slba / (n->zone_size / spp->secsz);
@@ -183,8 +181,6 @@ void ssd_init(FemuCtrl *n)
     for (int i = 0; i < spp->nchs; i++) {
         ssd_init_ch(&ssd->ch[i], spp);
     }
-
-    assert(pthread_create(&ssd->ftl_thread, NULL, ftl_thread, n) == 0);
 }
 
 void zns_init(FemuCtrl *n) {
@@ -362,7 +358,7 @@ static void zns_reset_wpp(NvmeZone *zone, struct ssdparams *spp, int num_fcg, ui
     zone->d.state = NVME_ZONE_STATE_EMPTY;
 }
 
-static void zns_reset(FemuCtrl *n, NvmeRequest *req) {
+void zns_reset(FemuCtrl *n, NvmeRequest *req) {
     uint64_t slba = req->slba;
     uint8_t num_fcg = n->num_fcg;
     struct ssd *ssd = n->ssd;
@@ -402,7 +398,7 @@ static void zns_reset(FemuCtrl *n, NvmeRequest *req) {
     }
 }
 
-static uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
+uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
     uint64_t slba = req->slba;
     uint16_t nlb = req->nlb;
 
@@ -445,7 +441,7 @@ static uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
     return maxlat;
 }
 
-static void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uint16_t nlb) {
+void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uint16_t nlb) {
     struct ssd *ssd = n->ssd;
     struct ssdparams *spp = &ssd->sp;
 
@@ -462,7 +458,7 @@ static void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uin
         ftl_err("NVME_ZONE_INVALID_WRITE: %lu, %lu, %d\n", zone->write_ptr, slba, zone->ZoneID);
 }
 
-static uint64_t zns_write(FemuCtrl *n, NvmeRequest *req) {
+uint64_t zns_write(FemuCtrl *n, NvmeRequest *req) {
     uint64_t slba = req->slba;
     uint16_t nlb = req->nlb;
     uint8_t num_fcg = n->num_fcg;
@@ -498,63 +494,6 @@ static uint64_t zns_write(FemuCtrl *n, NvmeRequest *req) {
         maxlat = (curlat > maxlat) ? curlat : maxlat;
     }
     return maxlat;
-}
-
-static void *ftl_thread(void *arg)
-{
-    FemuCtrl *n = (FemuCtrl *)arg;
-    struct ssd *ssd = n->ssd;
-    NvmeRequest *req = NULL;
-    uint64_t lat = 0;
-    int rc;
-    int i;
-
-    while (!*(ssd->dataplane_started_ptr)) {
-        usleep(100000);
-    }
-
-    /* FIXME: not safe, to handle ->to_ftl and ->to_poller gracefully */
-    ssd->to_ftl = n->to_ftl;
-    ssd->to_poller = n->to_poller;
-
-    while (1) {
-        for (i = 0; i < n->num_poller; i++) {
-            if (!ssd->to_ftl[i] || !femu_ring_count(ssd->to_ftl[i]))
-                continue;
-
-            rc = femu_ring_dequeue(ssd->to_ftl[i], (void *)&req, 1);
-            if (rc != 1) {
-                printf("FEMU: FTL to_ftl dequeue failed\n");
-            }
-            ftl_assert(req);
-            switch (req->cmd.opcode) {
-            case NVME_CMD_WRITE:
-                lat = zns_write(n, req);
-                break;
-            case NVME_CMD_READ:
-                lat = zns_read(n, req);
-                break;
-            case NVME_CMD_RESET:
-                zns_reset(n, req);
-                lat = 0;
-                break;
-            default:
-                ftl_err("FTL received unkown request type, ERROR\n");
-            }
-
-            if (n->enable_latency) {
-                req->reqlat = lat;
-                req->expire_time += lat;
-            }
-
-            rc = femu_ring_enqueue(ssd->to_poller[i], (void *)&req, 1);
-            if (rc != 1) {
-                ftl_err("FTL to_poller enqueue failed\n");
-            }
-        }
-    }
-
-    return NULL;
 }
 
 #endif /* USE_LIFETIME_FTL */

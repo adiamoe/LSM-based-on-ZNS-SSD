@@ -13,9 +13,6 @@
 #include <assert.h>
 #include <unistd.h>
 #include <pthread.h>
-#include "queue.h"
-#include "pqueue.h"
-#include "rte_ring.h"
 #include "nvme.h"
 
 #define INVALID_PPA     (~(0ULL))
@@ -27,8 +24,8 @@ enum {
     NAND_WRITE = 1,
     NAND_ERASE = 2,
 
-    NAND_READ_LATENCY = 40000,
-    NAND_PROG_LATENCY = 200000,
+    NAND_READ_LATENCY = 4000,
+    NAND_PROG_LATENCY = 20000,
     NAND_ERASE_LATENCY = 2000000,
 };
 
@@ -154,15 +151,6 @@ struct ssdparams {
     uint64_t flash_size;  /* size of NAND flash, in bytes */
 };
 
-typedef struct line {
-    int id;  /* line id, the same as corresponding block id */
-    int ipc; /* invalid page count in this line */
-    int vpc; /* valid page count in this line */
-    QTAILQ_ENTRY(line) entry; /* in either {free,victim,full} list */
-    /* position in the priority queue for victim lines */
-    size_t pos;
-} line;
-
 struct zns_write_pointer {
     int FCGid;
     uint64_t ch;
@@ -183,16 +171,18 @@ struct ssd {
     struct ssdparams sp;
     struct ssd_channel *ch;
 
-    /* lockless ring for communication with NVMe IO thread */
-    struct rte_ring **to_ftl;
-    struct rte_ring **to_poller;
     bool *dataplane_started_ptr;
-    pthread_t ftl_thread;
 };
 
 void ssd_init(FemuCtrl *n);
 
 void zns_init(FemuCtrl *n);
+
+uint64_t zns_write(FemuCtrl *n, NvmeRequest *req);
+
+uint64_t zns_read(FemuCtrl *n, NvmeRequest *req);
+
+void zns_reset(FemuCtrl *n, NvmeRequest *req);
 
 #define ZONE_SIZE 1024 * 1024 * 64
 
@@ -213,7 +203,6 @@ typedef struct NvmeZone {
     NvmeZoneDescr           d;
     uint64_t                write_ptr;
     struct zns_write_pointer    wpp;
-    QTAILQ_ENTRY(NvmeZone)  entry;
 } NvmeZone;
 
 #ifdef FEMU_DEBUG_FTL

@@ -8,9 +8,6 @@
 #include <string.h>
 #include <assert.h>
 #include <time.h>
-#include "pqueue.h"
-
-#define FEMU_NUM_POLLER 1
 
 enum NvmeIoCommands {
     NVME_CMD_FLUSH              = 0x00,
@@ -61,26 +58,12 @@ typedef struct FemuCtrl {
     bool                 enable_latency;
 
     uint32_t             num_poller;
-    struct rte_ring      **to_ftl;
-    struct rte_ring      **to_poller;
-    pqueue_t             **pqs;
-    pthread_t            *pollers;
 
     bool                 dataplane_started;
 
     atomic_uint_fast64_t req_id;
 } FemuCtrl;
 
-typedef struct NvmePollerThreadArgument {
-    FemuCtrl        *n;
-    int             index;
-} NvmePollerThreadArgument;
-
-typedef struct NvmeDifTuple {
-    uint16_t guard_tag;
-    uint16_t app_tag;
-    uint32_t ref_tag;
-} NvmeDifTuple;
 
 typedef enum {
     QEMU_CLOCK_REALTIME = 0,

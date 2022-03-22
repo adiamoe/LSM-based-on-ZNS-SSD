@@ -1,8 +1,6 @@
 #ifndef __ACTIVE_FTL_H
 #define __ACTIVE_FTL_H
 
-//#define USE_LIFETIME_FTL
-
 /* default: 8GB, 6.25% OP */
 #define SSD_SECSZ       512
 #define SSD_SECS_PER_PG 8
@@ -20,9 +18,6 @@
 // #define SSD_PLS_PER_LUN 1
 // #define SSD_LUNS_PER_CH 8
 // #define SSD_NCHS        8
-
-/* 1GB */
-#define SSD_WRITE_BUFFER_SIZE (1ULL * 1024 * 1024 * 1024)
 
 #define NUM_FCGS 2
 
