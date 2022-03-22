@@ -8,6 +8,10 @@
 #include <unordered_map>
 #include <list>
 
+using std::pair;
+using std::list;
+using std::unordered_map;
+
 class LRUCache {
 public:
     explicit LRUCache(int capacity) : cap(capacity) {}
@@ -19,20 +23,20 @@ public:
         cache.erase(map[key]);
         cache.push_front(key_value);
         map[key] = cache.begin();
-        return key_value.second;
+        return key_value;
     }
 
-    void put(uint32_t key, uint32_t value) {
+    void put(uint32_t key) {
         if (map.find(key) == map.end()) {
             if (cache.size() == cap) {
-                map.erase(cache.back().first);
+                map.erase(cache.back());
                 cache.pop_back();
             }
         }
         else {
             cache.erase(map[key]);
         }
-        cache.push_front({key, value});
+        cache.push_front(key);
         map[key] = cache.begin();
     }
 
@@ -44,8 +48,8 @@ public:
     }
 private:
     int cap;
-    list<pair<uint32_t, uint32_t>> cache{};
-    unordered_map<uint32_t, list<pair<uint32_t, uint32_t>>::iterator> map{};
+    list<uint32_t> cache{};
+    unordered_map<uint32_t, list<uint32_t>::iterator> map{};
 };
 
 #endif //FEMU_SIM_LRUCACHE_H

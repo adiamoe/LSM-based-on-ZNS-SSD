@@ -69,19 +69,11 @@ enum {
 
 /* describe a physical page addr */
 struct ppa {
-    union {
-        struct {
-            uint64_t blk : BLK_BITS;
-            uint64_t pg  : PG_BITS;
-            uint64_t sec : SEC_BITS;
-            uint64_t pl  : PL_BITS;
-            uint64_t lun : LUN_BITS;
-            uint64_t ch  : CH_BITS;
-            uint64_t rsv : 1;
-        } g;
-
-        uint64_t ppa;
-    };
+    uint64_t blk;
+    uint64_t pg;
+    uint64_t pl;
+    uint64_t lun;
+    uint64_t ch;
 };
 
 struct nand_block {
@@ -171,23 +163,13 @@ typedef struct line {
     size_t pos;
 } line;
 
-/* wp: record next write addr */
-struct write_pointer {
-    struct line *curline;
-    int ch;
-    int lun;
-    int pg;
-    int blk;
-    int pl;
-};
-
 struct zns_write_pointer {
     int FCGid;
-    int ch;
-    int lun;
-    int pg;
-    int blk;
-    int pl;
+    uint64_t ch;
+    uint64_t lun;
+    uint64_t pg;
+    uint64_t blk;
+    uint64_t pl;
 };
 
 struct nand_cmd {
@@ -200,7 +182,6 @@ struct ssd {
     char *ssdname;
     struct ssdparams sp;
     struct ssd_channel *ch;
-    struct write_pointer wp;
 
     /* lockless ring for communication with NVMe IO thread */
     struct rte_ring **to_ftl;

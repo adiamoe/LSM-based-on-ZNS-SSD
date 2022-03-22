@@ -97,8 +97,8 @@ static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *a
 
     /* wait until the request finishes */
     while (!req.completed);
+    //printf("Req %lu complete\n", req.id);
 }
-
 
 struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_latency)
 {

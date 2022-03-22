@@ -2,8 +2,8 @@
 
 class correctnessTest : public Test {
 private:
-    const int Min = 1024 * 20;
-    const int Max = 1024 * 30;
+    const int Min = 0;
+    const int Max = 1024 * 12;
 
     void regular_test() {
 
