@@ -5,7 +5,7 @@
 #define FEMU_SIM_UTILS_H
 
 #include <threadPool.h>
-#include <LRUCache.h>
+#include <cache.h>
 #include <femu.h>
 #include <cmath>
 #include <map>
@@ -28,7 +28,6 @@ const uint64_t MiB = 1024 * KiB;
 const uint64_t GiB = 1024 * MiB;
 const uint64_t DEFAULT_SSTABLE_SIZE = 2 * MiB;
 const uint64_t DEFAULT_PAGE_SIZE = 4 * KiB;
-const uint64_t SSD_SIZE (8 * GiB);
 
 struct zone_meta{
     uint64_t start;
@@ -42,54 +41,48 @@ struct zone_meta{
 //储存数据的内存管理器
 class MemoryManager {
 private:
-    //储存每一层SSTable的start pos
-    typedef uint64_t start;
-    vector<start> unusedPage; //清空的页表
-    vector<std::map<int, start>> mappingTable; //各个页表位置
-    map<start, pair<int, int>> remappingTable; //各个位置对应的页表
+    vector<std::map<int, uint64_t>> mappingTable; //各个页表位置
+    map<uint64_t, pair<int, int>> remappingTable; //各个位置对应的页表
     vector<std::map<int, std::future<int>>> completeTable;
     FemuCtrl *femu;
     //缓存读上来的页，避免重复读取
     LRUCache pageCache;
     vector<zone_meta> zone_metas;
     uint32_t zone_num;
-    uint8_t open_zone_num;
+    uint64_t zone_cap;
+    uint16_t open_zone_num;
 
-    vector<uint8_t> open_zone;
+    vector<uint32_t> open_zone;
     int which_zone;
 
-    queue<uint64_t> empty_zone;
+    uint64_t ssd_capactity;
+    queue_cache *empty_zone;
     unordered_set<uint64_t> full_zone;
 
     ThreadPool pool;
 public:
     MemoryManager(): pageCache(512), pool(MAXIMUM_NUM_OF_OPEN_ZONE){
+        auto *meta = new uint64_t[4];
+        get_zns_meta(meta);         //获取zns的一些基本信息
+        ssd_capactity = meta[3];
 
-        femu = femu_init(SSD_SIZE, false, true);
+        femu = femu_init(ssd_capactity, false, true);
         mappingTable.emplace_back();
         completeTable.emplace_back();
 
-        auto *meta = new uint64_t[4];
-        get_zns_meta(meta);         //获取zns的一些基本信息
-        uint64_t zone_size = meta[0];
-        zone_num = SSD_SIZE / zone_size;
+        zone_cap = meta[0];
+        zone_num = ssd_capactity / zone_cap;
         for(unsigned i=0; i<zone_num; ++i) {
-            zone_metas.emplace_back(i*zone_size, i*zone_size, (i+1)*zone_size-1, 0);
+            zone_metas.emplace_back(i*zone_cap, i*zone_cap, (i+1)*zone_cap-1, 0);
         }
 
         open_zone_num = MAXIMUM_NUM_OF_OPEN_ZONE;
 
-        //先打开可以完全并行的zone，即各个zone所处的die均不同
-        unsigned int blocks_per_die = meta[2] * meta[3];
-        for(int i=0; i<zone_num/meta[1]; ++i) {
-            for(int j=0; j<meta[1]; ++j) {
-                empty_zone.emplace(j + (meta[2] * i) % blocks_per_die + i/meta[3]*2);
-            }
-        }
+        unsigned queue_num = zone_num / meta[2];
+        empty_zone = new queue_cache(queue_num, meta[2], zone_num);
 
         for(int i=0; i<open_zone_num; ++i) {
-            open_zone.emplace_back(empty_zone.front());
-            empty_zone.pop();
+            open_zone.emplace_back(empty_zone->get());
         }
         which_zone = 0;
     }
@@ -106,7 +99,9 @@ public:
     void deleteTable(int level, int num);
 
     //清空对应的zone
-    void resetZone(int zone_order);
+    void resetZone(unsigned zone_order, bool force);
+
+    void evictZone();
 };
 
 #endif //FEMU_SIM_UTILS_H

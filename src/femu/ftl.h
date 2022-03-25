@@ -15,54 +15,20 @@
 #include <pthread.h>
 #include "nvme.h"
 
-#define INVALID_PPA     (~(0ULL))
-#define INVALID_LPN     (~(0ULL))
-#define UNMAPPED_PPA    (~(0ULL))
-
 enum {
     NAND_READ =  0,
     NAND_WRITE = 1,
     NAND_ERASE = 2,
 
-    NAND_READ_LATENCY = 4000,
-    NAND_PROG_LATENCY = 20000,
-    NAND_ERASE_LATENCY = 2000000,
+    NAND_READ_LATENCY = 40,
+    NAND_PROG_LATENCY = 200,
+    NAND_ERASE_LATENCY = 20000,
 };
 
 enum {
     USER_IO = 0,
     GC_IO = 1,
 };
-
-enum {
-    SEC_FREE = 0,
-    SEC_INVALID = 1,
-    SEC_VALID = 2,
-
-    PG_FREE = 0,
-    PG_INVALID = 1,
-    PG_VALID = 2
-};
-
-enum {
-    FEMU_ENABLE_GC_DELAY = 1,
-    FEMU_DISABLE_GC_DELAY = 2,
-
-    FEMU_ENABLE_DELAY_EMU = 3,
-    FEMU_DISABLE_DELAY_EMU = 4,
-
-    FEMU_RESET_ACCT = 5,
-    FEMU_ENABLE_LOG = 6,
-    FEMU_DISABLE_LOG = 7,
-};
-
-
-#define BLK_BITS    (16)
-#define PG_BITS     (16)
-#define SEC_BITS    (8)
-#define PL_BITS     (8)
-#define LUN_BITS    (8)
-#define CH_BITS     (7)
 
 /* describe a physical page addr */
 struct ppa {
@@ -183,8 +149,6 @@ uint64_t zns_write(FemuCtrl *n, NvmeRequest *req);
 uint64_t zns_read(FemuCtrl *n, NvmeRequest *req);
 
 void zns_reset(FemuCtrl *n, NvmeRequest *req);
-
-#define ZONE_SIZE 1024 * 1024 * 64
 
 typedef enum NvmeZoneState {
     NVME_ZONE_STATE_EMPTY            ,

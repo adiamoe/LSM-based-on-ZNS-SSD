@@ -7,12 +7,12 @@
 void MemoryManager::getValue(int level, int num, uint64_t offset, uint64_t length) {
     if(completeTable[level].find(num) == completeTable[level].end() || completeTable[level][num].get() == 0) {
         completeTable[level].erase(num);
-        start s = mappingTable[level][num];
-        uint32_t left = (s + offset) / DEFAULT_PAGE_SIZE;  //对齐页边界
-        uint32_t right = (s + offset + length) / DEFAULT_PAGE_SIZE;
-        uint32_t batch_left = UINT32_MAX, batch_right = UINT32_MAX;
-        vector<pair<int32_t, int32_t>> interval;
-        uint32_t page = left;
+        uint64_t s = mappingTable[level][num];
+        uint64_t left = (s + offset) / DEFAULT_PAGE_SIZE;  //对齐页边界
+        uint64_t right = (s + offset + length) / DEFAULT_PAGE_SIZE;
+        uint64_t batch_left = UINT32_MAX, batch_right = UINT32_MAX;
+        vector<pair<uint64_t, uint64_t>> interval;
+        uint64_t page = left;
         //对已经缓存的页，直接跳过
         for (; page <= right; ++page) {
             if (pageCache.get(page) == -1)
@@ -46,18 +46,18 @@ void MemoryManager::deleteTable(int level, int num) {
     assert(completeTable[level].find(num) == completeTable[level].end());
     if(mappingTable[level].find(num) == mappingTable[level].end())
         return;
-    start s = mappingTable[level][num];
+    uint64_t s = mappingTable[level][num];
     mappingTable[level].erase(num);
     remappingTable.erase(s);
 
-    int order = s / (SSD_SIZE / zone_num);
+    unsigned order = s / zone_cap;
     zone_metas[order].valid_table_num--;
     zone_metas[order].deleted_table.emplace_back(s);
-    resetZone(order);
+    resetZone(order, false);
 
-    uint32_t left = s / DEFAULT_PAGE_SIZE;  //对齐页边界
-    uint32_t right = (s + DEFAULT_SSTABLE_SIZE) / DEFAULT_PAGE_SIZE;
-    for(uint32_t page = left; page <= right; ++page) {
+    uint64_t left = s / DEFAULT_PAGE_SIZE;  //对齐页边界
+    uint64_t right = (s + DEFAULT_SSTABLE_SIZE) / DEFAULT_PAGE_SIZE;
+    for(uint64_t page = left; page <= right; ++page) {
         pageCache.del(page);
     }
 }
@@ -65,41 +65,58 @@ void MemoryManager::deleteTable(int level, int num) {
 void MemoryManager::readTable(int level, int num, uint64_t offset, uint64_t length) {
     if(completeTable[level].find(num) == completeTable[level].end() || completeTable[level][num].get() == 0) {
         completeTable[level].erase(num);
-        start s = mappingTable[level][num];
-        uint32_t left = (s + offset) / DEFAULT_PAGE_SIZE * DEFAULT_PAGE_SIZE;  //对齐页边界
-        uint32_t right = ((s + offset + length) / DEFAULT_PAGE_SIZE + 1)* DEFAULT_PAGE_SIZE;
+        uint64_t s = mappingTable[level][num];
+        uint64_t left = (s + offset) / DEFAULT_PAGE_SIZE * DEFAULT_PAGE_SIZE;  //对齐页边界
+        uint64_t right = ((s + offset + length) % DEFAULT_SSTABLE_SIZE == 0)?
+                s + offset + length : ((s + offset + length) / DEFAULT_PAGE_SIZE + 1)* DEFAULT_PAGE_SIZE;
         femu_read(femu,right-left, left, nullptr);
     }
 }
 
 void MemoryManager::writeTable(int level, int num) {
-    if(empty_zone.size() < 30)
-        printf("empty_zone.size() = %u\n", empty_zone.size());
-    start s = zone_metas[open_zone[which_zone]].write_ptr;
+    if((double) empty_zone->getsize() / zone_num < 0.2)
+        evictZone();
+    uint64_t s = zone_metas[open_zone[which_zone]].write_ptr;
     zone_meta &meta = zone_metas[open_zone[which_zone]];
     meta.write_ptr += DEFAULT_SSTABLE_SIZE;
     meta.valid_table_num++;
     if(meta.write_ptr >= meta.end) {
         full_zone.emplace(open_zone[which_zone]);
-        if(empty_zone.empty()) {
+        if(empty_zone->empty()) {
             printf("Error, zones are all full\n");
             exit(1);
         }
-        open_zone[which_zone] = empty_zone.front();
-        empty_zone.pop();
+        open_zone[which_zone] = empty_zone->get();
     }
-    which_zone = (++which_zone) % 10;
+    which_zone = (++which_zone) % open_zone_num;
     if(mappingTable.size()<level+1) {
         mappingTable.emplace_back();
         completeTable.emplace_back();
     }
     mappingTable[level][num] = s;
     remappingTable[s] = {level, num};
-    //femu_write(femu, DEFAULT_SSTABLE_SIZE, s, nullptr);
     completeTable[level][num] = pool.enqueue(which_zone, &femu_write, femu, DEFAULT_SSTABLE_SIZE, s, nullptr);
 }
 
-void MemoryManager::resetZone(int zone_order) {
+void MemoryManager::evictZone() {
+    printf("Evict Zone\n");
+    unsigned maximum_table = zone_cap / DEFAULT_SSTABLE_SIZE;
+    auto iter = full_zone.begin();
+    unsigned zone_order = *iter;
+    unsigned to_reset = *iter;
+    double min_rate = 1;
+    while(iter != full_zone.end()) {
+        double rate = (double) zone_metas[zone_order].valid_table_num / maximum_table;
+        if(rate < min_rate) {
+            min_rate = rate;
+            to_reset = *iter;
+        }
+        iter++;
+    }
+    resetZone(to_reset, true);
+}
+
+void MemoryManager::resetZone(unsigned zone_order, bool force) {
     auto &meta = zone_metas[zone_order];
 
     //只清空写满的zone
@@ -110,12 +127,11 @@ void MemoryManager::resetZone(int zone_order) {
         printf("Error: The full zone is not in the full queue\n");
     }
 
-    unsigned maximum_table = (SSD_SIZE / zone_num) / DEFAULT_SSTABLE_SIZE;
+    unsigned maximum_table = zone_cap / DEFAULT_SSTABLE_SIZE;
     double rate = (double) meta.valid_table_num / maximum_table;
 
     //利用率不足0.3时清空整个zone
-    if(rate < 0.3) {
-        uint64_t zone_size = SSD_SIZE / zone_num;
+    if(rate < 0.3 || force) {
         uint64_t start_table = meta.start;
         uint64_t end_table = meta.end;
         vector<uint64_t> rewrite_table;
@@ -132,10 +148,13 @@ void MemoryManager::resetZone(int zone_order) {
         unsigned i = 0, prev = 0;
         uint64_t table;
         while(i < rewrite_table.size()) {
-            unsigned to_zone = empty_zone.front();
-            empty_zone.pop();
+            if(empty_zone->empty()) {
+                printf("Error, data size is more than ssd capacity! Program exit\n");
+                exit(1);
+            }
+            unsigned to_zone = empty_zone->get();
 
-            start s = zone_metas[to_zone].write_ptr;
+            uint64_t s = zone_metas[to_zone].write_ptr;
             zone_meta &to_meta = zone_metas[to_zone];
             for (table = to_meta.write_ptr; table < to_meta.end && i < rewrite_table.size();
                  table += DEFAULT_SSTABLE_SIZE, i++) {
@@ -151,14 +170,14 @@ void MemoryManager::resetZone(int zone_order) {
                 full_zone.emplace(to_zone);
                 prev = i;
             } else {
-                empty_zone.emplace(to_zone);
+                empty_zone->put(to_zone);
             }
         }
-        femu_reset(femu, zone_size, meta.start, nullptr);
+        femu_reset(femu, zone_cap, meta.start, nullptr);
         meta.write_ptr = meta.start;
         meta.valid_table_num = 0;
         meta.deleted_table.clear();
-        empty_zone.emplace(zone_order);
+        empty_zone->put(zone_order);
         full_zone.erase(zone_order);
     }
 }

@@ -3,7 +3,7 @@
 class correctnessTest : public Test {
 private:
     const int Min = 0;
-    const int Max = 1024 * 40;
+    const int Max = 1024 * 100;
 
     void regular_test() {
 

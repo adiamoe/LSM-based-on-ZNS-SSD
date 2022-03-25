@@ -190,7 +190,7 @@ void zns_init(FemuCtrl *n) {
     n->num_fcg = NUM_FCGS;
     uint64_t start = 0, zone_size = n->zone_size;
     uint64_t block_size = spp->secsz * spp->secs_per_pg * spp->pgs_per_blk;
-    uint8_t num_fcg = n->num_fcg;
+    uint16_t num_fcg = n->num_fcg;
     NvmeZone *zone;
     int i;
 
@@ -360,7 +360,7 @@ static void zns_reset_wpp(NvmeZone *zone, struct ssdparams *spp, int num_fcg, ui
 
 void zns_reset(FemuCtrl *n, NvmeRequest *req) {
     uint64_t slba = req->slba;
-    uint8_t num_fcg = n->num_fcg;
+    uint16_t num_fcg = n->num_fcg;
     struct ssd *ssd = n->ssd;
     struct ssdparams *spp = &ssd->sp;
     NvmeZone *zone = zns_get_zone_by_lba(n, slba, spp);
@@ -400,13 +400,14 @@ void zns_reset(FemuCtrl *n, NvmeRequest *req) {
 
 uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
     uint64_t slba = req->slba;
-    uint16_t nlb = req->nlb;
+    uint64_t nlb = req->nlb;
 
     struct ssd *ssd = n->ssd;
     struct ssdparams *spp = &ssd->sp;
 
+    //todo: another branch
     NvmeZone *zone_start = zns_get_zone_by_lba(n, slba, spp);
-    NvmeZone *zone_end = zns_get_zone_by_lba(n, slba + nlb, spp);
+    NvmeZone *zone_end = zns_get_zone_by_lba(n, slba + nlb - 1, spp);
 
     uint64_t start_lpn = slba / spp->secs_per_pg;
     uint64_t end_lpn = (slba + nlb - 1) / spp->secs_per_pg;
@@ -441,7 +442,7 @@ uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
     return maxlat;
 }
 
-void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uint16_t nlb) {
+void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uint64_t nlb) {
     struct ssd *ssd = n->ssd;
     struct ssdparams *spp = &ssd->sp;
 
@@ -460,8 +461,8 @@ void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uint16_t n
 
 uint64_t zns_write(FemuCtrl *n, NvmeRequest *req) {
     uint64_t slba = req->slba;
-    uint16_t nlb = req->nlb;
-    uint8_t num_fcg = n->num_fcg;
+    uint64_t nlb = req->nlb;
+    uint16_t num_fcg = n->num_fcg;
 
     struct ssd *ssd = n->ssd;
     struct ssdparams *spp = &ssd->sp;

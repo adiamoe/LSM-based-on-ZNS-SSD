@@ -8,15 +8,13 @@ static inline uint64_t alloc_req_id(struct FemuCtrl *femu)
     return atomic_fetch_add(&femu->req_id, 1);
 }
 
-static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *arg, int op)
+static void dispatch_io(struct FemuCtrl *femu, uint64_t len, uint64_t offset, void *arg, int op)
 {
     uint64_t id = alloc_req_id(femu);
     uint64_t secsz = femu->ssd->sp.secsz;
     uint64_t start_lba = offset / secsz;
     uint64_t end_lba = (offset + len) / secsz;
-    int poller_index = 0; /* need to support multiple pollers in the future */
     NvmeRequest req;
-    int ret;
 
     memset(&req, 0, sizeof(NvmeRequest));
     req.id = id;
@@ -56,7 +54,7 @@ static void dispatch_io(struct FemuCtrl *femu, size_t len, off_t offset, void *a
     }
 }
 
-struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_latency)
+struct FemuCtrl *femu_init(uint64_t ssd_size, bool enable_backend, bool enable_latency)
 {
     struct FemuCtrl *femu = g_malloc0(sizeof(struct FemuCtrl));
 
@@ -76,21 +74,21 @@ struct FemuCtrl *femu_init(size_t ssd_size, bool enable_backend, bool enable_lat
     return femu;
 }
 
-int femu_read(struct FemuCtrl *femu, size_t len, off_t offset, void *arg)
+int femu_read(struct FemuCtrl *femu, uint64_t len, uint64_t offset, void *arg)
 {
     dispatch_io(femu, len, offset, arg, NVME_CMD_READ);
 
     return 0;
 }
 
-int femu_write(struct FemuCtrl *femu, size_t len, off_t offset, void *arg)
+int femu_write(struct FemuCtrl *femu, uint64_t len, uint64_t offset, void *arg)
 {
     dispatch_io(femu, len, offset, arg, NVME_CMD_WRITE);
 
     return 0;
 }
 
-int femu_reset(struct FemuCtrl *femu, size_t len, off_t offset, void *arg) {
+int femu_reset(struct FemuCtrl *femu, uint64_t len, uint64_t offset, void *arg) {
 
     dispatch_io(femu, len, offset, arg, NVME_CMD_RESET);
 
@@ -101,6 +99,6 @@ void get_zns_meta(uint64_t *meta) {
     meta[0] = ZONE_SIZE;
     meta[1] = NUM_FCGS;
     uint64_t block_size = SSD_SECSZ * SSD_SECS_PER_PG * SSD_PGS_PER_BLK;
-    meta[2] = ZONE_SIZE / block_size / (SSD_NCHS / NUM_FCGS);   //每个zone在每个chip上占据的block数
-    meta[3] = SSD_BLKS_PER_PL / meta[2];                        //每个die可以容纳的zone数量
+    meta[2] = SSD_BLKS_PER_PL / (ZONE_SIZE / block_size / (SSD_NCHS / NUM_FCGS));  //每个die可以容纳的zone数量
+    meta[3] = block_size * SSD_BLKS_PER_PL * SSD_LUNS_PER_CH * SSD_NCHS;
 }
