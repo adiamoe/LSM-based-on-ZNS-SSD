@@ -1,1 +1,0 @@
-add_library(LSM-Tree STATIC kvstore.cc SkipList.cpp Table.cpp)

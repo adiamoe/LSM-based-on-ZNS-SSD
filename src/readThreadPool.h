@@ -1,11 +1,10 @@
 //
-// Created by ZJW on 2022/3/16.
+// Created by ZJW on 2022/4/7.
 //
 
-#ifndef FEMU_SIM_THREADPOOL_H
-#define FEMU_SIM_THREADPOOL_H
+#ifndef ZNS_THREADPOOL_H
+#define ZNS_THREADPOOL_H
 
-#include <memory>
 #include <vector>
 #include <queue>
 #include <memory>
@@ -17,44 +16,45 @@
 #include <stdexcept>
 #include <atomic>
 
-class ThreadPool {
+class ReadPool {
 public:
-    explicit ThreadPool(size_t);
+    explicit ReadPool(size_t);
     template<class F, class... Args>
-    auto enqueue(int index, F&& f, Args&&... args)
+    auto enqueue(F&& f, Args&&... args)
     -> std::future<typename std::result_of<F(Args...)>::type>;
-    ~ThreadPool();
+    ~ReadPool();
 private:
     // need to keep track of threads so we can join them
-    std::vector<std::thread> workers;
+    std::vector< std::thread > workers;
     // the task queue
-    std::vector<std::queue<std::function<void()>>> tasks;
+    std::queue< std::function<void()> > tasks;
 
     // synchronization
-    std::vector<std::mutex> queue_mutex;
-    std::vector<std::condition_variable> condition;
-    std::atomic<bool> stop;
+    std::mutex queue_mutex;
+    std::condition_variable condition;
+    atomic<bool> stop;
 };
 
 // the constructor just launches some amount of workers
-inline ThreadPool::ThreadPool(size_t threads)
-        :stop(false), tasks(threads), queue_mutex(threads), condition(threads)
+inline ReadPool::ReadPool(size_t threads)
+        :   stop(false)
 {
     for(size_t i = 0;i<threads;++i)
         workers.emplace_back(
-                [this, i]
+                [this]
                 {
                     while(true)
                     {
                         std::function<void()> task;
+
                         {
-                            std::unique_lock<std::mutex> lock(this->queue_mutex[i]);
-                            this->condition[i].wait(lock,
-                                                    [this, i]{ return stop.load() || !(tasks[i].empty()); });
-                            if(stop.load() && tasks[i].empty())
+                            std::unique_lock<std::mutex> lock(this->queue_mutex);
+                            this->condition.wait(lock,
+                                                 [this]{ return this->stop.load() || !this->tasks.empty(); });
+                            if(this->stop.load() && this->tasks.empty())
                                 return;
-                            task = std::move(tasks[i].front());
-                            this->tasks[i].pop();
+                            task = std::move(this->tasks.front());
+                            this->tasks.pop();
                         }
 
                         task();
@@ -65,7 +65,7 @@ inline ThreadPool::ThreadPool(size_t threads)
 
 // add new work item to the pool
 template<class F, class... Args>
-auto ThreadPool::enqueue(int index, F&& f, Args&&... args)
+auto ReadPool::enqueue(F&& f, Args&&... args)
 -> std::future<typename std::result_of<F(Args...)>::type>
 {
     using return_type = typename std::result_of<F(Args...)>::type;
@@ -76,27 +76,25 @@ auto ThreadPool::enqueue(int index, F&& f, Args&&... args)
 
     std::future<return_type> res = task->get_future();
     {
-        std::lock_guard<std::mutex> lock(queue_mutex[index]);
+        std::unique_lock<std::mutex> lock(queue_mutex);
 
         // don't allow enqueueing after stopping the pool
         if(stop.load())
             throw std::runtime_error("KVStore has been closed");
 
-        tasks[index].emplace([task](){ (*task)(); });
+        tasks.emplace([task](){ (*task)(); });
     }
-    condition[index].notify_one();
+    condition.notify_one();
     return res;
 }
 
 // the destructor joins all threads
-inline ThreadPool::~ThreadPool()
+inline ReadPool::~ReadPool()
 {
     stop.store(true);
-    for(auto &con:condition) {
-        con.notify_all();
-    }
+    condition.notify_all();
     for(std::thread &worker: workers)
         worker.join();
 }
 
-#endif //FEMU_SIM_THREADPOOL_H
+#endif //ZNS_THREADPOOL_H
