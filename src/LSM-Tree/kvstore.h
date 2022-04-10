@@ -30,5 +30,5 @@ public:
 
 	void compactionForLevel(int level);
 
-	void writeToFile(int level, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable);
+	void writeToFile(int level, uint64_t timeStamp, uint64_t numPair, vector<pair<uint64_t, string>> &newTable);
 };

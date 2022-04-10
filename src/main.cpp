@@ -3,7 +3,7 @@
 
 class correctnessTest : public Test {
 private:
-    const uint64_t length = 2500;
+    const uint64_t length = 3000;
     enum test_type {throughput = 0, latency = 1, correctness = 2};
     test_type type = throughput;
 
@@ -124,7 +124,7 @@ private:
 
     void Correctness_test() {
         const int Min = 0;
-        const int Max = 1024 * 200;
+        const int Max = 1024 * 80;
         int i;
 
         start = chrono::steady_clock::now();
@@ -137,7 +137,6 @@ private:
         start = chrono::steady_clock::now();
         for (i = Min + 1; i < Max; i += 4) {
             store.put(i, std::string(i + 1, 't'));
-            EXPECT(std::string(i + 1, 't'), store.get(i));
             EXPECT(std::string(i, 's'), store.get(i - 1));
         }
         phase();
@@ -145,6 +144,11 @@ private:
         start = chrono::steady_clock::now();
         for (i = Min; i < Max; i += 2)
             EXPECT(std::string(i + 1, 's'), store.get(i));
+        phase();
+
+        start = chrono::steady_clock::now();
+        for (i = Min+1; i < Max; i += 4)
+            EXPECT(std::string(i + 1, 't'), store.get(i));
         phase();
     }
 

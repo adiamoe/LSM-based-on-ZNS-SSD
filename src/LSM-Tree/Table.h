@@ -20,12 +20,12 @@ private:
     Meta metaInfo{};
     uint64_t minMaxKey[2]{};               //最小最大键
     bitset<81920> bloomFilter;          //过滤器
-    map<uint64_t, uint32_t> offset;      //储存对应的偏移量
-    map<uint64_t, string> keyValue;      //键值对存在内存
+    vector<pair<uint64_t, uint32_t>> offset;      //储存对应的偏移量
+    vector<pair<uint64_t, string>> keyValue;      //键值对存在内存
 public:
     Table(MemoryManager &pool, SkipList *memTable, int order);
 
-    Table(MemoryManager &pool, int level, int order, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable);
+    Table(MemoryManager &pool, int level, int order, uint64_t timeStamp, uint64_t numPair, vector<pair<uint64_t, string>> &newTable);
 
     //时间戳小的排前面
     bool operator<(const Table& temp) const
@@ -48,8 +48,9 @@ public:
     uint64_t getMinKey() const {return minMaxKey[0];}
 
     string getValue(MemoryManager &pool, uint64_t key) const;
-    void traverse(MemoryManager &pool, map<uint64_t, string> &pair) const;
+    void traverse(MemoryManager &pool, vector<pair<uint64_t, string>> &pair) const;
     void clear(MemoryManager &pool) const;
+    int search(uint64_t target) const;
 };
 
 

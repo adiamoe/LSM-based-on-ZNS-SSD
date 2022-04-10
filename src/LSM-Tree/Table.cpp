@@ -1,5 +1,6 @@
 #include "Table.h"
 
+
 Table::Table(MemoryManager &pool, SkipList *memTable, int order) {
     metaInfo.level = 0;
     metaInfo.order = order;
@@ -34,8 +35,8 @@ Table::Table(MemoryManager &pool, SkipList *memTable, int order) {
     {
         tempKey = node->key;
         index = dataArea + curlength;
-        offset[tempKey] = index;
-        keyValue.insert({tempKey, move(node->val)});
+        offset.emplace_back(tempKey, index);
+        keyValue.emplace_back(tempKey, move(node->val));
         curlength += node->val.size()+1;
         node = node->right;
     }
@@ -45,7 +46,7 @@ Table::Table(MemoryManager &pool, SkipList *memTable, int order) {
     memTable->clear();
 }
 
-Table::Table(MemoryManager &pool, int level, int order, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable) {
+Table::Table(MemoryManager &pool, int level, int order, uint64_t timeStamp, uint64_t numPair, vector<pair<uint64_t, string>> &newTable) {
     metaInfo.level = level;
     metaInfo.order = order;
 
@@ -82,14 +83,30 @@ Table::Table(MemoryManager &pool, int level, int order, uint64_t timeStamp, uint
     {
         tempKey = iter1->first;
         index = dataArea + curlength;
-        offset[tempKey] = index;
+        offset.emplace_back(tempKey, index);
         curlength += (iter1->second).size()+1;
-        keyValue.insert({tempKey, move(iter1->second)});
+        keyValue.emplace_back(tempKey, move(iter1->second));
         iter1++;
     }
 
     metaInfo.dataLength = curlength;
     pool.writeTable(level, order);
+}
+
+int Table::search(uint64_t target) const{
+    int low = 0, high = offset.size() - 1;
+    while(low <= high){
+        int mid = (high - low) / 2 + low;
+        uint64_t num = offset[mid].first;
+        if (num == target) {
+            return mid;
+        } else if (num > target) {
+            high = mid - 1;
+        } else {
+            low = mid + 1;
+        }
+    }
+    return -1;
 }
 
 /**
@@ -106,23 +123,25 @@ string Table::getValue(MemoryManager &pool, uint64_t key) const{
             return "";
 
     //再在键值对中进行查找
-    if(offset.count(key)==0)
+    if(search(key) == -1)
         return "";
-    auto iter1 = offset.find(key);
-    auto iter2 = offset.find(key);
-    iter2++;
+
+    int index1 = search(key);
+    int index2 = index1;
+    index2++;
 
     const unsigned dataArea = InitialSize + metaInfo.pairNum * 12;
-    uint64_t len = iter2!=offset.end()? (iter2->second-iter1->second):(dataArea + metaInfo.dataLength - iter1->second);
+    uint64_t len = (index2 != offset.size())? (offset[index2].second-offset[index1].second):(dataArea + metaInfo.dataLength - offset[index1].second);
 
-    pool.getValue(metaInfo.level, metaInfo.order, iter1->second, len);
+    pool.getValue(metaInfo.level, metaInfo.order, offset[index1].second, len);
 
-    string ans = keyValue.find(key)->second;
+    string ans = keyValue[search(key)].second;
     return ans;
 }
 
 //遍历文件，将键值对全部读进内存
-void Table::traverse(MemoryManager &pool, map<uint64_t, string> &pair) const{
+void Table::traverse(MemoryManager &pool, vector<pair<uint64_t, string>> &pair) const{
+    pair.reserve(1024);
     pair = keyValue;
     const unsigned dataArea = InitialSize + metaInfo.pairNum * 12;
     pool.readTable(metaInfo.level, metaInfo.order, dataArea, metaInfo.dataLength);

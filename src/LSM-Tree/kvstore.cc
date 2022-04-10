@@ -94,7 +94,7 @@ bool KVStore::del(uint64_t key)
     return flag;
 }
 
-void update(vector<map<uint64_t, string>> &KVToCompact, vector<map<uint64_t, string>::iterator> &KVToCompactIter,
+void update(vector<vector<pair<uint64_t, string>>> &KVToCompact, vector<vector<pair<uint64_t, string>>::iterator> &KVToCompactIter,
         map<uint64_t,int> &minKey, int index) {
     while(KVToCompactIter[index] != KVToCompact[index].end()) {
         uint64_t select = KVToCompactIter[index]->first;
@@ -176,17 +176,18 @@ void KVStore::compactionForLevel(int level)
         }
     }
 
-    vector<map<uint64_t, string>> KVToCompact;                   //被合并的键值对，下标越大时间戳越大
-    vector<map<uint64_t, string>::iterator> KVToCompactIter;     //键值对迭代器
+    vector<vector<pair<uint64_t, string>>> KVToCompact;                   //被合并的键值对，下标越大时间戳越大
+    vector<vector<pair<uint64_t, string>>::iterator> KVToCompactIter;     //键值对迭代器
     uint64_t size = InitialSize;
     map<uint64_t, int> minKey;                      //minKey中只存放num个数据，分别为各个SSTable中最小键和对应的SSTable
     uint64_t tempKey;
     int index;                                      //对应的SSTable序号
     string tempValue;
-    map<uint64_t, string> newTable;                 //暂存合并后的键值对
+    vector<pair<uint64_t, string>> newTable;                 //暂存合并后的键值对
+    newTable.reserve(8192);
 
     while(!sortTable.empty()) {
-        map<uint64_t, string> KVPair;
+        vector<pair<uint64_t, string>> KVPair;
         sortTable.top().traverse(memoryPool, KVPair);
         sortTable.pop();
         KVToCompact.push_back(KVPair);
@@ -225,7 +226,7 @@ void KVStore::compactionForLevel(int level)
             writeToFile(level, timestamp, newTable.size(), newTable);
             size = InitialSize + tempValue.size() + 1 + 12;
         }
-        newTable[tempKey] = tempValue;
+        newTable.emplace_back(tempKey, tempValue);
 next:   minKey.erase(tempKey);
         KVToCompactIter[index]++;
         update(KVToCompact, KVToCompactIter, minKey, index);
@@ -251,7 +252,7 @@ next:   minKey.erase(tempKey);
     compactionForLevel(level+1);
 }
 
-void KVStore::writeToFile(int level, uint64_t timeStamp, uint64_t numPair, map<uint64_t, string> &newTable)
+void KVStore::writeToFile(int level, uint64_t timeStamp, uint64_t numPair, vector<pair<uint64_t, string>> &newTable)
 {
     Level[level]++;
     SSTable[level].emplace(memoryPool, level, Level[level], timeStamp, numPair, newTable);
