@@ -12,6 +12,7 @@
 #include <kvstore.h>
 #include <unordered_map>
 #include <random>
+#include "readThreadPool.h"
 
 using std::string;
 using std::random_device;
@@ -88,9 +89,9 @@ protected:
     }
 
     class KVStore store;
-
+    ReadPool pool;
 public:
-    Test() {
+    Test(int thread): pool(thread) {
         nr_tests = 0;
         nr_passed_tests = 0;
         nr_phases = 0;

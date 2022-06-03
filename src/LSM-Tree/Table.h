@@ -19,7 +19,7 @@ class Table {
 private:
     Meta metaInfo{};
     uint64_t minMaxKey[2]{};               //最小最大键
-    bitset<81920> bloomFilter;          //过滤器
+    bitset<8*filterSize> bloomFilter;          //过滤器
     vector<pair<uint64_t, uint32_t>> offset;      //储存对应的偏移量
     vector<pair<uint64_t, string>> keyValue;      //键值对存在内存
 public:

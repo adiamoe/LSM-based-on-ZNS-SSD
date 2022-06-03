@@ -21,13 +21,13 @@ using std::pair;
 using std::map;
 using std::unordered_set;
 
-#define MAXIMUM_NUM_OF_OPEN_ZONE 17
+#define MAXIMUM_NUM_OF_OPEN_ZONE 16
 
 const uint64_t KiB = 1024;
 const uint64_t MiB = 1024 * KiB;
 const uint64_t GiB = 1024 * MiB;
-const uint64_t DEFAULT_SSTABLE_SIZE = 2 * MiB;
-const uint64_t DEFAULT_PAGE_SIZE = 4 * KiB;
+const uint64_t DEFAULT_SSTABLE_SIZE = 64 * MiB;
+const uint64_t DEFAULT_PAGE_SIZE = 16 * KiB;
 
 struct zone_meta{
     uint64_t start;
@@ -63,8 +63,9 @@ private:
     ThreadPool pool;
 
     uint64_t reset_times;
+    uint32_t readNum;
 public:
-    MemoryManager(): pageCache(5120), pool(MAXIMUM_NUM_OF_OPEN_ZONE+1){
+    MemoryManager(): pageCache(64000), pool(MAXIMUM_NUM_OF_OPEN_ZONE+1){
         auto *meta = new uint64_t[4];
         get_zns_meta(meta);         //获取zns的一些基本信息
         ssd_capactity = meta[3];
@@ -89,10 +90,11 @@ public:
         }
         which_zone = 0;
         reset_times = 0;
+        readNum = 0;
     }
 
     ~MemoryManager() {
-        printf("The number of Zone Reset is %lu\n", reset_times);
+        printf("The number of Zone Reset is %lu, the number of getting value is %u\n", reset_times, readNum);
         delete empty_zone;
     }
 

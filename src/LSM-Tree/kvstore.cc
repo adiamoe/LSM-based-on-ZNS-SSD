@@ -14,9 +14,9 @@ KVStore::KVStore()
 //将 MemTable 中的所有数据以 SSTable 形式写进磁盘
 KVStore::~KVStore()
 {
-    Table newTable(memoryPool, memTable, ++Level[0]);
-    if(Level[0] > Level0)
-        compactionForLevel(1);
+//    Table newTable(memoryPool, memTable, ++Level[0]);
+//    if(Level[0] > Level0)
+//        compactionForLevel(1);
     delete memTable;
 }
 
@@ -99,7 +99,7 @@ void update(vector<vector<pair<uint64_t, string>>> &KVToCompact, vector<vector<p
     while(KVToCompactIter[index] != KVToCompact[index].end()) {
         uint64_t select = KVToCompactIter[index]->first;
         if(minKey.count(select)==0) {
-            minKey[select] = index;
+            minKey.emplace(select, index);
             break;
         }
         else if(index > minKey[select]) {
@@ -117,6 +117,10 @@ void update(vector<vector<pair<uint64_t, string>>> &KVToCompact, vector<vector<p
  * 其它层则只将超出最大个数的文件向下合并
  * @param level 被合并的层
  */
+
+bool operator<(const set<Table>::iterator &a, const set<Table>::iterator &b) {
+        return (*a) > (*b);
+}
 
 void KVStore::compactionForLevel(int level)
 {
@@ -137,12 +141,12 @@ void KVStore::compactionForLevel(int level)
     if(level == SSTable.size()-1)
         lastLevel = true;
 
-    vector<Table> FileToRemoveLevelminus1;                    //记录需要被删除的文件
-    vector<Table> FileToRemoveLevel;
+    vector<set<Table>::iterator> FileToRemoveLevelminus1;                    //记录需要被删除的文件
+    vector<set<Table>::iterator> FileToRemoveLevel;
 
 
     //需要被合并的SSTable
-    priority_queue<Table, vector<Table>, greater<>> sortTable;
+    priority_queue<set<Table>::iterator> sortTable;
 
     uint64_t timestamp = 0;
     uint64_t tempMin = INT64_MAX, tempMax = 0;
@@ -154,22 +158,21 @@ void KVStore::compactionForLevel(int level)
     auto it = SSTable[level-1].begin();
     for(int i=0 ; i<compactNum; ++i)
     {
-        Table table = *it;
-        sortTable.push(table);
-        FileToRemoveLevelminus1.push_back(table);
-        it++;
+        sortTable.push(it);
+        FileToRemoveLevelminus1.push_back(it);
 
-        timestamp = table.getTimestamp();
-        if(table.getMaxKey()>tempMax)
-            tempMax = table.getMaxKey();
-        if(table.getMinKey()<tempMin)
-            tempMin = table.getMinKey();
+        timestamp = it->getTimestamp();
+        if(it->getMaxKey()>tempMax)
+            tempMax = it->getMaxKey();
+        if(it->getMinKey()<tempMin)
+            tempMin = it->getMinKey();
+        it++;
     }
 
     //找到Level中和Level-1中键有交集的文件
-    for(auto &iter:SSTable[level])
+    for(auto iter = SSTable[level].begin(); iter != SSTable[level].end(); ++iter)
     {
-        if(iter.getMaxKey()>=tempMin && iter.getMinKey()<=tempMax)
+        if(iter->getMaxKey()>=tempMin && iter->getMinKey()<=tempMax)
         {
             sortTable.push(iter);
             FileToRemoveLevel.push_back(iter);
@@ -184,13 +187,14 @@ void KVStore::compactionForLevel(int level)
     int index;                                      //对应的SSTable序号
     string tempValue;
     vector<pair<uint64_t, string>> newTable;                 //暂存合并后的键值对
-    newTable.reserve(8192);
+    newTable.reserve(81920);
 
     while(!sortTable.empty()) {
         vector<pair<uint64_t, string>> KVPair;
-        sortTable.top().traverse(memoryPool, KVPair);
+        KVPair.reserve(20480);
+        sortTable.top()->traverse(memoryPool, KVPair);
         sortTable.pop();
-        KVToCompact.push_back(KVPair);
+        KVToCompact.push_back(move(KVPair));
     }
 
     KVToCompactIter.resize(KVToCompact.size());
@@ -218,7 +222,7 @@ void KVStore::compactionForLevel(int level)
         auto iter = minKey.begin();
         tempKey = iter->first;
         index = iter->second;
-        tempValue = KVToCompactIter[index]->second;
+        tempValue = move(KVToCompactIter[index]->second);
         if(lastLevel && tempValue == DEL)    //最后一层的删除标记不写入文件
             goto next;
         size += tempValue.size() + 1 + 12;
@@ -226,7 +230,7 @@ void KVStore::compactionForLevel(int level)
             writeToFile(level, timestamp, newTable.size(), newTable);
             size = InitialSize + tempValue.size() + 1 + 12;
         }
-        newTable.emplace_back(tempKey, tempValue);
+        newTable.emplace_back(tempKey, move(tempValue));
 next:   minKey.erase(tempKey);
         KVToCompactIter[index]++;
         update(KVToCompact, KVToCompactIter, minKey, index);
@@ -240,12 +244,12 @@ next:   minKey.erase(tempKey);
 
     //删除level和level-1中的被合并文件
     for(auto &file:FileToRemoveLevelminus1) {
-        file.clear(memoryPool);
+        file->clear(memoryPool);
         SSTable[level-1].erase(file);
     }
 
     for(auto &file:FileToRemoveLevel) {
-        file.clear(memoryPool);
+        file->clear(memoryPool);
         SSTable[level].erase(file);
     }
 

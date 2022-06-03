@@ -3,13 +3,14 @@
 
 class correctnessTest : public Test {
 private:
-    const uint64_t length = 3000;
+    const uint64_t length = 2000;
+    const uint64_t cap = 50000000;
     enum test_type {throughput = 0, latency = 1, correctness = 2};
     test_type type = throughput;
 
     void data_preparation(vector<pair<bool, uint64_t>> &run_data) {
-        std::fstream load("../../src/load.dat");
-        std::fstream run("../../src/run.dat");
+        std::fstream load("../../../load.dat");
+        std::fstream run("../../../brun.dat");
         if(!load.is_open() || !run.is_open())
             cerr<<"file is not open correctly\n";
 
@@ -18,9 +19,12 @@ private:
         char buffer[128];
         while(!load.eof()) {
             load.getline(buffer, 128, '\n');
+            if(buffer[0]>'9' || buffer[0]<'0')
+                continue;
             load_data.emplace_back(stoull(buffer));
+            if(load_data.size() == cap)
+                break;
         }
-
         while(!run.eof()) {
            run.getline(buffer, 128, '\n');
            string s = buffer;
@@ -31,16 +35,31 @@ private:
                run_data.emplace_back(true, stoul(num));
            else if(operation == "UPDATE")
                run_data.emplace_back(false, stoul(num));
-           else
-               cerr<<"Not have such operation\n";
+           if(run_data.size() == cap)
+               break;
         }
+        //sort(load_data.begin(), load_data.end());
 
         cout<<"Loading data\n";
-        string init(length, '0');
+        string init(length, '9');
         start = chrono::steady_clock::now();
-        for(uint64_t i : load_data)
+        uint64_t num = 0;
+        uint64_t n = load_data.size();
+        double times = 0.01;
+        for(uint64_t i : load_data) {
+            num++;
+            if(n * times <= num+1) {
+                int len = (int) (times * 100);
+                printf("\r%d%% [", len);
+                for(int j=1; j<=len/5; j++){
+                    printf("=");
+                }
+                fflush(stdout);
+                times+=0.01;
+            }
             store.put(i, init);
-
+        }
+        printf(">]\n");
         phase();
     }
 
@@ -48,10 +67,23 @@ private:
         vector<pair<bool, uint64_t>> run_data;
         data_preparation(run_data);
         cout<<"Running and testing\n";
-        string update(length, '1');
+        string update(length, 's');
         vector<double> get_time;
         vector<double> put_time;
+        uint64_t num = 0;
+        uint64_t n = run_data.size();
+        double times = 0.01;
         for(auto &it : run_data) {
+            num++;
+            if(n * times <= num+1) {
+                int len = (int) (times * 100);
+                printf("\r%d%% [", len);
+                for(int j=1; j<=len/5; j++){
+                    printf("=");
+                }
+                fflush(stdout);
+                times+=0.01;
+            }
             if (it.first) {
                 auto begin = chrono::steady_clock::now();
                 store.get(it.second);
@@ -66,6 +98,7 @@ private:
                 put_time.emplace_back(chrono::duration<double, micro>(elapsed).count());
             }
         }
+        printf(">]\n");
         sort(get_time.begin(), get_time.end());
         sort(put_time.begin(), put_time.end());
 
@@ -78,9 +111,13 @@ private:
         get_statistic.emplace_back(get_average);
         put_statistic.emplace_back(put_average);
 
+        //计算10分位
+        get_statistic.emplace_back(get_time[lround((double) get_time.size()*0.1)]);
+        put_statistic.emplace_back(put_time[lround((double) put_time.size()*0.1)]);
+
         //计算中位数
-        get_statistic.emplace_back(get_time[lround(get_time.size()/2)]);
-        put_statistic.emplace_back(put_time[lround(put_time.size()/2)]);
+        get_statistic.emplace_back(get_time[lround((double) get_time.size()*0.5)]);
+        put_statistic.emplace_back(put_time[lround((double) put_time.size()*0.5)]);
 
         //计算90分位
         get_statistic.emplace_back(get_time[lround((double) get_time.size()*0.9)]);
@@ -94,9 +131,13 @@ private:
         get_statistic.emplace_back(get_time[lround((double) get_time.size()*0.99)]);
         put_statistic.emplace_back(put_time[lround((double) put_time.size()*0.99)]);
 
-        //计算99999分位
-        get_statistic.emplace_back(get_time[lround((double) get_time.size()*0.99999)]);
-        put_statistic.emplace_back(put_time[lround((double) put_time.size()*0.99999)]);
+        //计算999分位
+        get_statistic.emplace_back(get_time[lround((double) get_time.size()*0.999)]);
+        put_statistic.emplace_back(put_time[lround((double) put_time.size()*0.999)]);
+
+        //计算9999分位
+        get_statistic.emplace_back(get_time[lround((double) get_time.size()*0.9999)]);
+        put_statistic.emplace_back(put_time[lround((double) put_time.size()*0.9999)]);
 
         cout<<"get latency:\t";
         for(auto i:get_statistic) {
@@ -106,25 +147,41 @@ private:
         for(auto i:put_statistic) {
             cout<<i<<"\t";
         }
+        cout<<"\n";
     }
 
     void throughput_test() {
         vector<pair<bool, uint64_t>> run_data;
         data_preparation(run_data);
         cout<<"Running and testing\n";
-        string update(length, '1');
+        string update(length, 'h');
         start = chrono::steady_clock::now();
-        for(auto &it : run_data)
-            if(it.first)
+        uint64_t num = 0;
+        uint64_t n = run_data.size();
+        double times = 0.01;
+        for(auto &it : run_data) {
+            num++;
+            if(n * times <= num+1) {
+                int len = (int) (times * 100);
+                printf("\r%d%% [", len);
+                for(int j=1; j<=len/5; j++){
+                    printf("=");
+                }
+                fflush(stdout);
+                times+=0.01;
+            }
+            if (it.first)
                 store.get(it.second);
             else
                 store.put(it.second, update);
+        }
+        printf(">]\n");
         phase();
     }
 
     void Correctness_test() {
         const int Min = 0;
-        const int Max = 1024 * 80;
+        const int Max = 1024 * 100;
         int i;
 
         start = chrono::steady_clock::now();
@@ -153,7 +210,7 @@ private:
     }
 
 public:
-    correctnessTest() : Test() {}
+    correctnessTest(int thread) : Test(thread) {}
 
     void start_test() override {
         switch(type) {
@@ -174,7 +231,7 @@ public:
 };
 
 int main() {
-    correctnessTest test;
+    correctnessTest test(5);
     test.start_test();
     return 0;
 }

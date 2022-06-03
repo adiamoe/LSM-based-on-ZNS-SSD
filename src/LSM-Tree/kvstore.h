@@ -8,8 +8,8 @@
 using namespace std;
 
 const string DEL = "~DELETED~";
-inline int UpperNum(int i) {return pow(5, i);}
-const int Level0 = 4;
+inline int UpperNum(int i) {return (int)pow(3, i+1);}
+const int Level0 = 3;
 
 class KVStore {
 private:

@@ -438,7 +438,8 @@ uint64_t zns_read(FemuCtrl *n, NvmeRequest *req) {
         maxlat = (sublat > maxlat) ? sublat : maxlat;
     }
 
-    return maxlat;
+    //return maxlat;
+    return 0;
 }
 
 void zns_check_zone_write(FemuCtrl *n, NvmeZone *zone, uint64_t slba, uint64_t nlb) {

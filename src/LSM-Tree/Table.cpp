@@ -22,7 +22,7 @@ Table::Table(MemoryManager &pool, SkipList *memTable, int order) {
         tempKey = node->key;
         MurmurHash3_x64_128(&tempKey, sizeof(tempKey), 1, hash);
         for(auto i:hash)
-            bloomFilter.set(i%81920);
+            bloomFilter.set(i%bloomFilter.size());
         node = node->right;
     }
 
@@ -70,7 +70,7 @@ Table::Table(MemoryManager &pool, int level, int order, uint64_t timeStamp, uint
         tempKey = iter1->first;
         MurmurHash3_x64_128(&tempKey, sizeof(tempKey), 1, hash);
         for(auto i:hash)
-            bloomFilter.set(i%81920);
+            bloomFilter.set(i%bloomFilter.size());
         iter1++;
     }
 
@@ -119,7 +119,7 @@ string Table::getValue(MemoryManager &pool, uint64_t key) const{
     unsigned int hash[4] = {0};
     MurmurHash3_x64_128(&key, sizeof(key), 1, hash);
     for(unsigned int i : hash)
-        if(!bloomFilter[i%81920])
+        if(!bloomFilter.test(i%bloomFilter.size()))
             return "";
 
     //再在键值对中进行查找
